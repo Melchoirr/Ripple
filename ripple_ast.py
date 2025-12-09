@@ -221,33 +221,47 @@ class Program(ASTNode):
 
 # ================== 工具函数 ==================
 
-def extract_dependencies(expr: Expression) -> List[str]:
+def extract_dependencies(expr: Expression, local_vars: set = None) -> List[str]:
     """从表达式中提取依赖的标识符列表"""
+    if local_vars is None:
+        local_vars = set()
+
     dependencies = []
 
-    def visit(node):
+    def visit(node, locals_set):
         if isinstance(node, Identifier):
-            dependencies.append(node.name)
+            # 只有不在局部变量集合中的标识符才是外部依赖
+            if node.name not in locals_set:
+                dependencies.append(node.name)
         elif isinstance(node, BinaryOp):
-            visit(node.left)
-            visit(node.right)
+            visit(node.left, locals_set)
+            visit(node.right, locals_set)
         elif isinstance(node, UnaryOp):
-            visit(node.operand)
+            visit(node.operand, locals_set)
         elif isinstance(node, FunctionCall):
             for arg in node.arguments:
-                visit(arg)
+                visit(arg, locals_set)
         elif isinstance(node, IfExpression):
-            visit(node.condition)
-            visit(node.then_branch)
-            visit(node.else_branch)
+            visit(node.condition, locals_set)
+            visit(node.then_branch, locals_set)
+            visit(node.else_branch, locals_set)
         elif isinstance(node, PreOp):
-            dependencies.append(node.stream_name)
+            # PreOp 引用的流名不受局部变量影响
+            if node.stream_name not in locals_set:
+                dependencies.append(node.stream_name)
         elif isinstance(node, FoldOp):
-            visit(node.stream)
-            visit(node.initial)
-            visit(node.accumulator.body)
+            # Fold 操作：stream 和 initial 使用当前作用域
+            visit(node.stream, locals_set)
+            visit(node.initial, locals_set)
 
-    visit(expr)
+            # Lambda body 使用扩展的作用域（包含 Lambda 参数）
+            if isinstance(node.accumulator, Lambda):
+                # 创建新的局部变量集合，包含 Lambda 参数
+                lambda_locals = locals_set.copy()
+                lambda_locals.update(node.accumulator.parameters)
+                visit(node.accumulator.body, lambda_locals)
+
+    visit(expr, local_vars)
     return list(set(dependencies))  # 去重
 
 

@@ -1,0 +1,38 @@
+// Ripple 语言示例 4: 条件流（If Expression）
+// 展示条件表达式和动态依赖
+
+// 输入源
+source temperature : float := 20.0;
+source humidity : float := 50.0;
+
+// 温度状态分类
+stream temp_status <- if temperature < 10.0 then "cold"
+                      else if temperature < 25.0 then "comfortable"
+                      else "hot" end end;
+
+// 湿度状态
+stream humidity_status <- if humidity < 30.0 then "dry"
+                          else if humidity < 70.0 then "normal"
+                          else "humid" end end;
+
+// 综合舒适度评分（0-100）
+stream comfort_score <- if temp_status == "comfortable" && humidity_status == "normal" then 100
+                        else if temp_status == "comfortable" then 70
+                        else if humidity_status == "normal" then 60
+                        else 30 end end end;
+
+// 空调建议
+stream ac_recommendation <- if temp_status == "hot" && comfort_score < 50 then "Turn on AC"
+                            else if temp_status == "cold" then "Turn on heater"
+                            else "No action needed" end end;
+
+// 输出
+sink temp_out <- temp_status;
+sink humidity_out <- humidity_status;
+sink comfort_out <- comfort_score;
+sink recommendation_out <- ac_recommendation;
+
+// 测试场景：
+// Scenario 1: temp=20, humidity=50 -> comfortable, normal, score=100, "No action needed"
+// Scenario 2: temp=30, humidity=80 -> hot, humid, score=30, "Turn on AC"
+// Scenario 3: temp=5, humidity=40 -> cold, normal, score=60, "Turn on heater"

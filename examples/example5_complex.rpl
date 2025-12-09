@@ -1,0 +1,51 @@
+// Ripple 语言示例 5: 复杂示例 - 股票交易信号系统
+// 综合展示多种特性：fold、pre、条件表达式
+
+// 输入：股票价格流
+source price : float := 100.0;
+
+// 简单移动平均（SMA）：使用 fold 计算最近的平均价格
+// 这里简化为累积平均
+stream price_sum <- fold(price, 0.0, (acc, p) => acc + p);
+stream price_count <- fold(price, 0.0, (acc, p) => acc + 1.0);
+stream sma <- price_sum / price_count;
+
+// 价格变化
+stream prev_price <- pre(price, 100.0);
+stream price_change <- price - prev_price;
+stream price_change_pct <- if prev_price > 0.0 then (price_change / prev_price) * 100.0 else 0.0 end;
+
+// 趋势检测
+stream trend <- if price > sma then "uptrend"
+                else if price < sma then "downtrend"
+                else "neutral" end end;
+
+// 波动率指标（简化）
+stream volatility <- if price_change_pct > 5.0 || price_change_pct < -5.0 then "high"
+                     else if price_change_pct > 2.0 || price_change_pct < -2.0 then "medium"
+                     else "low" end end;
+
+// 交易信号生成
+stream signal <- if trend == "uptrend" && volatility != "high" && price_change_pct > 1.0 then "BUY"
+                 else if trend == "downtrend" && volatility != "high" && price_change_pct < -1.0 then "SELL"
+                 else "HOLD" end end;
+
+// 风险评估
+stream risk_level <- if volatility == "high" then 3
+                     else if volatility == "medium" then 2
+                     else 1 end end;
+
+// 输出仪表板
+sink price_out <- price;
+sink sma_out <- sma;
+sink trend_out <- trend;
+sink volatility_out <- volatility;
+sink signal_out <- signal;
+sink risk_out <- risk_level;
+
+// 模拟交易序列：
+// t=0: price=100 -> HOLD (初始状态)
+// t=1: price=102 -> BUY (上涨趋势)
+// t=2: price=105 -> BUY (继续上涨)
+// t=3: price=103 -> HOLD (小幅回调)
+// t=4: price=95 -> SELL (下跌趋势)

@@ -1,0 +1,33 @@
+// Ripple 语言示例 3: 状态累积（使用 Fold 操作符）
+// 展示 fold 操作符的使用，类似于函数式编程中的 reduce
+
+// 输入流：数字序列
+source numbers : int := 0;
+
+// 累加器：对所有输入求和
+// fold(stream, initial, (accumulator, current) => expression)
+stream sum <- fold(numbers, 0, (acc, x) => acc + x);
+
+// 乘积累积器
+stream product <- fold(numbers, 1, (acc, x) => acc * x);
+
+// 最大值追踪
+stream max_value <- fold(numbers, 0, (acc, x) => if x > acc then x else acc end);
+
+// 计数器：统计接收到的数字个数
+stream count <- fold(numbers, 0, (acc, x) => acc + 1);
+
+// 平均值：sum / count
+stream average <- if count > 0 then sum / count else 0 end;
+
+// 输出
+sink sum_output <- sum;
+sink product_output <- product;
+sink max_output <- max_value;
+sink avg_output <- average;
+
+// 示例执行序列：
+// 输入 1: sum=1, product=1, max=1, count=1, avg=1
+// 输入 2: sum=3, product=2, max=2, count=2, avg=1.5
+// 输入 5: sum=8, product=10, max=5, count=3, avg=2.67
+// 输入 3: sum=11, product=30, max=5, count=4, avg=2.75

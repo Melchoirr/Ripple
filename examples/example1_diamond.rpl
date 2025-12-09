@@ -1,0 +1,21 @@
+// Ripple 语言示例 1: 菱形依赖（Diamond Dependency）
+// 这个例子展示了 Ripple 如何处理菱形依赖，保证无故障传播
+
+// 声明输入源
+source A : int := 1;
+
+// B 和 C 都依赖 A
+stream B <- A * 2;
+stream C <- A + 1;
+
+// D 依赖 B 和 C（形成菱形）
+stream D <- B + C;
+
+// 输出 D 的值
+sink output <- D;
+
+// 当 A 从 1 变为 2 时：
+// - B 从 2 变为 4
+// - C 从 2 变为 3
+// - D 应该只计算一次：4 + 3 = 7
+// 不会出现中间错误状态（如 2+3=5 或 4+2=6）

@@ -1,0 +1,77 @@
+// Ripple 语言示例 9: CSV 文件处理
+// 展示 load_csv 内置函数的使用
+
+// ========== 加载 CSV 数据 ==========
+// load_csv(path) - 加载 CSV 文件，自动推断类型
+// load_csv(path, true) - 跳过表头
+source data := load_csv("examples/test_data.csv", true);
+
+// ========== 基本统计 ==========
+// 行数统计
+stream row_count <- len(data);
+
+// 获取某一列（0=name, 1=age, 2=salary, 3=active）
+stream ages <- col(data, 1);
+stream salaries <- col(data, 2);
+
+// 计算平均值
+stream avg_age <- avg(ages);
+stream avg_salary <- avg(salaries);
+
+// 计算总和
+stream total_salary <- sum(salaries);
+
+// ========== 数据过滤 ==========
+// 过滤活跃用户 (active = true)
+stream active_users <- filter(data, (row) => row[3]);
+stream active_count <- len(active_users);
+
+// 过滤高薪用户 (salary > 5000)
+stream high_salary_users <- filter(data, (row) => row[2] > 5000);
+stream high_salary_count <- len(high_salary_users);
+
+// ========== 数据转换 ==========
+// 提取所有姓名
+stream names <- map(data, (row) => row[0]);
+
+// 计算年薪（月薪 * 12）
+stream annual_salaries <- map(data, (row) => row[2] * 12);
+stream total_annual <- sum(annual_salaries);
+
+// ========== 聚合计算 ==========
+// 最高薪资
+stream max_salary <- reduce(salaries, 0, (acc, x) => if acc > x then acc else x end);
+
+// 最低薪资
+stream min_salary <- reduce(salaries, 999999, (acc, x) => if acc < x then acc else x end);
+
+// ========== 输出 ==========
+sink row_count_out <- row_count;
+sink avg_age_out <- avg_age;
+sink avg_salary_out <- avg_salary;
+sink total_salary_out <- total_salary;
+sink active_count_out <- active_count;
+sink high_salary_count_out <- high_salary_count;
+sink names_out <- names;
+sink total_annual_out <- total_annual;
+sink max_salary_out <- max_salary;
+sink min_salary_out <- min_salary;
+
+// ========== 预期输出 ==========
+// CSV 数据（跳过表头后）:
+// ["Alice", 30, 5000.50, true]
+// ["Bob", 25, 4500.00, false]
+// ["Charlie", 35, 6000.00, true]
+// ["David", 28, 5200.75, true]
+// ["Eve", 32, 5800.00, false]
+//
+// row_count = 5
+// avg_age = 30 (150/5)
+// avg_salary = 5300.25 ((5000.50+4500+6000+5200.75+5800)/5)
+// total_salary = 26501.25
+// active_count = 3 (Alice, Charlie, David)
+// high_salary_count = 4 (Alice: 5000.50, Charlie: 6000, David: 5200.75, Eve: 5800)
+// names = ["Alice", "Bob", "Charlie", "David", "Eve"]
+// total_annual = 318015.00 (26501.25 * 12)
+// max_salary = 6000.00
+// min_salary = 4500.00

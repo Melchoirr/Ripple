@@ -7,7 +7,83 @@ from typing import Dict, List, Any, Optional, Set, Callable
 from dataclasses import dataclass, field
 from collections import defaultdict
 import heapq
+import csv
+import os
 from ripple_ast import *
+
+
+def _infer_csv_value(s: str) -> Any:
+    """推断 CSV 单元格的值类型"""
+    s = s.strip()
+    if not s:
+        return None
+
+    # 尝试整数
+    try:
+        return int(s)
+    except ValueError:
+        pass
+
+    # 尝试浮点数
+    try:
+        return float(s)
+    except ValueError:
+        pass
+
+    # 尝试布尔值
+    if s.lower() in ('true', 'false'):
+        return s.lower() == 'true'
+
+    # 默认字符串
+    return s
+
+
+def _load_csv_file(path: str, skip_header: bool = False) -> List[List[Any]]:
+    """
+    加载 CSV 文件，自动推断类型
+
+    Args:
+        path: CSV 文件路径
+        skip_header: 是否跳过第一行（表头）
+
+    Returns:
+        2D 列表，每个元素自动推断类型
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"CSV file not found: {path}")
+
+    rows = []
+    with open(path, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        for i, row in enumerate(reader):
+            if skip_header and i == 0:
+                continue
+            parsed_row = [_infer_csv_value(cell) for cell in row]
+            rows.append(parsed_row)
+
+    return rows
+
+
+def _get_csv_header(path: str) -> List[str]:
+    """获取 CSV 文件的表头（第一行）"""
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"CSV file not found: {path}")
+
+    with open(path, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        return next(reader, [])
+
+
+def _get_csv_column(data: List[List[Any]], col: int) -> List[Any]:
+    """获取 CSV 数据的某一列"""
+    return [row[col] if col < len(row) else None for row in data]
+
+
+def _get_csv_row(data: List[List[Any]], row_idx: int) -> List[Any]:
+    """获取 CSV 数据的某一行"""
+    if 0 <= row_idx < len(data):
+        return data[row_idx]
+    return []
 
 
 @dataclass
@@ -57,8 +133,14 @@ class RippleEngine:
         self.nodes[name] = node
 
     def add_stream(self, name: str, formula: Callable, dependencies: Set[str],
-                   is_stateful: bool = False, initial_state: Any = None):
-        """添加流节点"""
+                   is_stateful: bool = False, initial_state: Any = None,
+                   trigger_deps: Set[str] = None):
+        """添加流节点
+
+        Args:
+            trigger_deps: 触发依赖（只有这些依赖变化时才重新计算）
+                          如果为 None，则所有 dependencies 都是触发依赖
+        """
         # 计算 rank（基于依赖节点的最大 rank + 1）
         max_dep_rank = 0
         for dep in dependencies:
@@ -77,8 +159,11 @@ class RippleEngine:
         )
         self.nodes[name] = node
 
-        # 注册到依赖节点的订阅者列表
-        for dep in dependencies:
+        # 确定哪些依赖应该触发更新
+        subscribe_deps = trigger_deps if trigger_deps is not None else dependencies
+
+        # 只注册到触发依赖的订阅者列表
+        for dep in subscribe_deps:
             if dep in self.nodes:
                 self.nodes[dep].subscribers.add(name)
 
@@ -89,6 +174,21 @@ class RippleEngine:
 
     def push_event(self, source_name: str, value: Any):
         """向源节点推送事件"""
+        # 检查是否是结构体整体更新
+        if source_name in self.nodes and not self.nodes[source_name].is_source:
+            # 可能是结构体虚拟节点，尝试更新字段节点
+            if isinstance(value, dict):
+                updated_any = False
+                for field_name, field_value in value.items():
+                    field_node_name = f"{source_name}.{field_name}"
+                    if field_node_name in self.nodes and self.nodes[field_node_name].is_source:
+                        self._update_source(field_node_name, field_value)
+                        updated_any = True
+                if updated_any:
+                    self.propagate()
+                    return
+            raise ValueError(f"'{source_name}' is not a source node")
+
         if source_name not in self.nodes:
             raise ValueError(f"Source '{source_name}' not found")
 
@@ -96,16 +196,18 @@ class RippleEngine:
         if not node.is_source:
             raise ValueError(f"'{source_name}' is not a source node")
 
-        # 更新源节点的值
+        self._update_source(source_name, value)
+        self.propagate()
+
+    def _update_source(self, source_name: str, value: Any):
+        """更新单个源节点的值"""
+        node = self.nodes[source_name]
         node.cached_value = value
         node.is_dirty = True
 
         # 将所有订阅者加入优先队列
         for subscriber in node.subscribers:
             self._enqueue(subscriber)
-
-        # 触发传播
-        self.propagate()
 
     def _enqueue(self, name: str):
         """将节点加入优先队列"""
@@ -204,6 +306,7 @@ class ExpressionEvaluator:
 
     def __init__(self, engine: RippleEngine):
         self.engine = engine
+        self.user_functions: Dict[str, Any] = {}  # 用户定义的函数
 
     def evaluate(self, expr: Expression, context: Dict[str, Any]) -> Any:
         """求值表达式"""
@@ -245,29 +348,133 @@ class ExpressionEvaluator:
                 return self.evaluate(expr.initial_value, context)
 
         elif isinstance(expr, FoldOp):
-            # Fold 操作符：累积状态
-            stream_value = self.evaluate(expr.stream, context)
+            # Fold 操作符：对数组进行折叠
+            # fold(array, initial, (acc, x) => body)
+            array_value = self.evaluate(expr.stream, context)
             accumulator_func = expr.accumulator
 
-            # 获取当前状态
-            if '__state__' in context and context['__state__'] is not None:
-                acc = context['__state__']
+            # 获取初始累积值
+            acc = self.evaluate(expr.initial, context)
+
+            # 对数组中的每个元素应用累积函数
+            if isinstance(array_value, list):
+                for elem in array_value:
+                    lambda_context = dict(context)
+                    lambda_context[accumulator_func.parameters[0]] = acc
+                    lambda_context[accumulator_func.parameters[1]] = elem
+                    acc = self.evaluate(accumulator_func.body, lambda_context)
             else:
-                acc = self.evaluate(expr.initial, context)
+                # 如果不是数组，当作单个元素处理
+                lambda_context = dict(context)
+                lambda_context[accumulator_func.parameters[0]] = acc
+                lambda_context[accumulator_func.parameters[1]] = array_value
+                acc = self.evaluate(accumulator_func.body, lambda_context)
 
-            # 应用累积函数
-            lambda_context = {
-                accumulator_func.parameters[0]: acc,
-                accumulator_func.parameters[1]: stream_value
-            }
-            new_acc = self.evaluate(accumulator_func.body, lambda_context)
-
-            return new_acc
+            return acc
 
         elif isinstance(expr, FunctionCall):
-            # 简单的内置函数
+            # 先检查用户定义的函数
+            if expr.name in self.user_functions:
+                return self._apply_user_function(expr.name, expr.arguments, context)
+            # 否则使用内置函数
             args = [self.evaluate(arg, context) for arg in expr.arguments]
             return self._apply_function(expr.name, args)
+
+        elif isinstance(expr, LetExpression):
+            # let name = value in body
+            # 先求值 value
+            value = self.evaluate(expr.value, context)
+            # 创建扩展的上下文，包含新绑定
+            let_context = dict(context)
+            let_context[expr.name] = value
+            # 在扩展上下文中求值 body
+            return self.evaluate(expr.body, let_context)
+
+        # 数组相关表达式
+        elif isinstance(expr, ArrayLiteral):
+            return [self.evaluate(elem, context) for elem in expr.elements]
+
+        elif isinstance(expr, ArrayAccess):
+            array = self.evaluate(expr.array, context)
+            index = self.evaluate(expr.index, context)
+
+            if not isinstance(array, list):
+                raise ValueError(f"Cannot index non-array type: {type(array)}")
+            if not isinstance(index, int):
+                raise ValueError(f"Array index must be int, got: {type(index)}")
+            if index < 0 or index >= len(array):
+                raise IndexError(f"Array index {index} out of bounds (length={len(array)})")
+
+            return array[index]
+
+        elif isinstance(expr, MapOp):
+            array = self.evaluate(expr.array, context)
+
+            if not isinstance(array, list):
+                raise ValueError(f"map expects array, got: {type(array)}")
+
+            result = []
+            for elem in array:
+                elem_context = dict(context)
+                elem_context[expr.mapper.parameters[0]] = elem
+                mapped_value = self.evaluate(expr.mapper.body, elem_context)
+                result.append(mapped_value)
+
+            return result
+
+        elif isinstance(expr, FilterOp):
+            array = self.evaluate(expr.array, context)
+
+            if not isinstance(array, list):
+                raise ValueError(f"filter expects array, got: {type(array)}")
+
+            result = []
+            for elem in array:
+                elem_context = dict(context)
+                elem_context[expr.predicate.parameters[0]] = elem
+                should_include = self.evaluate(expr.predicate.body, elem_context)
+                if should_include:
+                    result.append(elem)
+
+            return result
+
+        elif isinstance(expr, ReduceOp):
+            array = self.evaluate(expr.array, context)
+
+            if not isinstance(array, list):
+                raise ValueError(f"reduce expects array, got: {type(array)}")
+
+            acc = self.evaluate(expr.initial, context)
+
+            for elem in array:
+                lambda_context = {
+                    expr.accumulator.parameters[0]: acc,
+                    expr.accumulator.parameters[1]: elem
+                }
+                acc = self.evaluate(expr.accumulator.body, lambda_context)
+
+            return acc
+
+        # 结构体相关表达式
+        elif isinstance(expr, StructLiteral):
+            return {
+                field_name: self.evaluate(field_expr, context)
+                for field_name, field_expr in expr.fields.items()
+            }
+
+        elif isinstance(expr, FieldAccess):
+            # 尝试直接查找完整字段路径（用于字段级依赖）
+            field_path = self._get_field_path(expr)
+            if field_path and field_path in context:
+                return context[field_path]
+
+            # 否则求值 object 并访问字段
+            obj = self.evaluate(expr.object, context)
+            if not isinstance(obj, dict):
+                raise ValueError(f"Cannot access field on non-struct type: {type(obj)}")
+            if expr.field_name not in obj:
+                raise ValueError(f"Struct has no field '{expr.field_name}'")
+            return obj[expr.field_name]
 
         else:
             raise ValueError(f"Unsupported expression type: {type(expr)}")
@@ -295,6 +502,18 @@ class ExpressionEvaluator:
         else:
             raise ValueError(f"Unknown binary operator: {op}")
 
+    def _get_field_path(self, expr: Expression) -> Optional[str]:
+        """获取字段访问的完整路径，如 p.x 或 line.start.x"""
+        if isinstance(expr, FieldAccess):
+            base_path = self._get_field_path(expr.object)
+            if base_path:
+                return f"{base_path}.{expr.field_name}"
+            return None
+        elif isinstance(expr, Identifier):
+            return expr.name
+        else:
+            return None
+
     def _apply_unary_op(self, op: str, operand: Any) -> Any:
         """应用一元操作符"""
         if op == '!':
@@ -307,16 +526,61 @@ class ExpressionEvaluator:
     def _apply_function(self, name: str, args: List[Any]) -> Any:
         """应用内置函数"""
         builtin_functions = {
+            # 数学函数
             'abs': lambda x: abs(x),
-            'max': lambda *args: max(args),
-            'min': lambda *args: min(args),
+            'max': lambda *args: max(args) if len(args) > 1 else max(args[0]) if isinstance(args[0], list) else args[0],
+            'min': lambda *args: min(args) if len(args) > 1 else min(args[0]) if isinstance(args[0], list) else args[0],
             'sqrt': lambda x: x ** 0.5,
+
+            # 数组函数
+            'len': lambda arr: len(arr) if isinstance(arr, list) else len(str(arr)),
+            'head': lambda arr: arr[0] if arr else None,
+            'tail': lambda arr: arr[1:] if isinstance(arr, list) else [],
+            'last': lambda arr: arr[-1] if arr else None,
+            'sum': lambda arr: sum(arr) if isinstance(arr, list) else arr,
+            'reverse': lambda arr: list(reversed(arr)) if isinstance(arr, list) else arr,
+
+            # 矩阵函数
+            'transpose': lambda m: [[row[i] for row in m] for i in range(len(m[0]))] if m and m[0] else [],
+
+            # CSV 文件函数
+            'load_csv': lambda path, *args: _load_csv_file(path, args[0] if args else False),
+            'csv_header': lambda path: _get_csv_header(path),
+            'col': lambda data, i: _get_csv_column(data, i),
+            'row': lambda data, i: _get_csv_row(data, i),
+
+            # 统计函数
+            'avg': lambda arr: sum(arr) / len(arr) if arr else 0,
+            'count': lambda arr: len(arr),
+            'count_if': lambda arr, pred: sum(1 for x in arr if pred(x)),
         }
 
         if name in builtin_functions:
             return builtin_functions[name](*args)
         else:
             raise ValueError(f"Unknown function: {name}")
+
+    def _apply_user_function(self, name: str, arg_exprs: List, context: Dict[str, Any]) -> Any:
+        """应用用户定义的函数"""
+        func_decl = self.user_functions[name]
+
+        # 检查参数数量
+        if len(arg_exprs) != len(func_decl.parameters):
+            raise ValueError(
+                f"Function '{name}' expects {len(func_decl.parameters)} arguments, "
+                f"got {len(arg_exprs)}"
+            )
+
+        # 求值参数
+        arg_values = [self.evaluate(arg, context) for arg in arg_exprs]
+
+        # 创建函数的局部上下文
+        func_context = dict(context)
+        for param, value in zip(func_decl.parameters, arg_values):
+            func_context[param] = value
+
+        # 求值函数体
+        return self.evaluate(func_decl.body, func_context)
 
 
 # 测试代码

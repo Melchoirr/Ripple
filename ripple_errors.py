@@ -223,12 +223,32 @@ class UndefinedReferenceChecker:
         # 检查每个流的依赖
         for decl in stream_decls:
             for dep in decl.static_dependencies:
-                if dep not in defined_names:
+                if not UndefinedReferenceChecker._is_defined(dep, defined_names):
                     errors.append(
                         UndefinedReferenceError(dep, decl.name)
                     )
 
         return errors
+
+    @staticmethod
+    def _is_defined(dep: str, defined_names: Set[str]) -> bool:
+        """检查依赖是否已定义
+
+        对于带点的依赖（如 stats.count），检查：
+        1. 完整路径是否已定义（如 p.x 作为展开的源节点）
+        2. 或者基础名称是否已定义（如 stats 是一个返回结构体的流）
+        """
+        # 直接匹配
+        if dep in defined_names:
+            return True
+
+        # 对于带点的引用，检查基础名称
+        if '.' in dep:
+            base_name = dep.split('.')[0]
+            if base_name in defined_names:
+                return True
+
+        return False
 
 
 class DuplicateDefinitionChecker:

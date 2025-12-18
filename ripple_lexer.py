@@ -21,6 +21,11 @@ class TokenType(Enum):
     KW_END = "end"
     KW_MATCH = "match"
     KW_WITH = "with"
+    KW_ON = "on"  # 触发器关键字
+    KW_FUNC = "func"  # 函数定义关键字
+    KW_LET = "let"  # 局部变量定义
+    KW_IN = "in"    # let...in 表达式
+    KW_TYPE = "type"  # 类型定义关键字
 
     # 特殊操作符
     OP_BIND = "<-"           # 流式绑定符
@@ -30,6 +35,11 @@ class TokenType(Enum):
     # 时序操作符
     ID_PRE = "pre"           # 访问前一时刻的值
     ID_FOLD = "fold"         # 状态累积
+
+    # 数组操作符
+    ID_MAP = "map"           # 映射
+    ID_FILTER = "filter"     # 过滤
+    ID_REDUCE = "reduce"     # 归约
 
     # 基本操作符
     OP_PLUS = "+"
@@ -52,10 +62,14 @@ class TokenType(Enum):
     RPAREN = ")"
     LBRACE = "{"
     RBRACE = "}"
+    LBRACKET = "["
+    RBRACKET = "]"
     COMMA = ","
     SEMICOLON = ";"
     COLON = ":"
     ARROW = "=>"
+    EQUALS = "="          # 单独的等号（用于函数定义）
+    DOT = "."             # 字段访问
 
     # 类型
     TYPE_INT = "int"
@@ -102,8 +116,16 @@ class RippleLexer:
         'end': TokenType.KW_END,
         'match': TokenType.KW_MATCH,
         'with': TokenType.KW_WITH,
+        'on': TokenType.KW_ON,
+        'func': TokenType.KW_FUNC,
+        'let': TokenType.KW_LET,
+        'in': TokenType.KW_IN,
+        'type': TokenType.KW_TYPE,
         'pre': TokenType.ID_PRE,
         'fold': TokenType.ID_FOLD,
+        'map': TokenType.ID_MAP,
+        'filter': TokenType.ID_FILTER,
+        'reduce': TokenType.ID_REDUCE,
         'int': TokenType.TYPE_INT,
         'float': TokenType.TYPE_FLOAT,
         'bool': TokenType.TYPE_BOOL,
@@ -342,9 +364,13 @@ class RippleLexer:
                 ')': TokenType.RPAREN,
                 '{': TokenType.LBRACE,
                 '}': TokenType.RBRACE,
+                '[': TokenType.LBRACKET,
+                ']': TokenType.RBRACKET,
                 ',': TokenType.COMMA,
                 ';': TokenType.SEMICOLON,
                 ':': TokenType.COLON,
+                '=': TokenType.EQUALS,
+                '.': TokenType.DOT,
             }
 
             if char in single_char_tokens:

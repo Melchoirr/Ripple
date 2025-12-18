@@ -425,3 +425,56 @@ stream action <- if status == "hot" then "Turn on AC"
 ---
 
 **Ripple - 让数据流动起来！** 🌊
+
+
+
+## 其他语言的对比
+
+### Lustre（同步数据流语言）
+
+
+
+```lustre
+counter = 0 -> pre(counter) + 1;
+```
+
+`0 ->` 就是初始值语法
+
+
+
+### Haskell（scanl）
+
+
+
+```haskell
+scanl (+) 0 [1,2,3]  -- 0 是初始值
+```
+
+### JavaScript（reduce）
+
+
+
+```javascript
+[1,2,3].reduce((acc, x) => acc + x, 0)  // 0 是初始值
+```
+
+------
+
+## 能不能省略初始值？
+
+理论上可以设计默认值：
+
+
+
+- `int` 默认 0
+- `float` 默认 0.0
+- `bool` 默认 false
+- `string` 默认 ""
+
+但显式初始值更好，因为：
+
+
+
+1. **语义清晰**：读代码就知道从哪开始
+2. **避免意外**：有些场景初始值不应该是 0（比如乘法累积应该从 1 开始）
+3. **类型安全**：编译器可以推断类型

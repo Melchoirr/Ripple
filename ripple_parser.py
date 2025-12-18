@@ -68,7 +68,7 @@ class RippleParser:
     def parse_statement(self) -> Optional[Statement]:
         """
         解析语句：
-        Statement ::= SourceDecl | StreamDecl | SinkDecl
+        Statement ::= SourceDecl | StreamDecl | SinkDecl | FuncDecl | TypeDecl
         """
         if self.match(TokenType.KW_SOURCE):
             return self.parse_source_decl()
@@ -76,6 +76,10 @@ class RippleParser:
             return self.parse_stream_decl()
         elif self.match(TokenType.KW_SINK):
             return self.parse_sink_decl()
+        elif self.match(TokenType.KW_FUNC):
+            return self.parse_func_decl()
+        elif self.match(TokenType.KW_TYPE):
+            return self.parse_type_decl()
         else:
             raise ParseError(
                 f"Unexpected token {self.current_token().type.name} "
@@ -86,18 +90,38 @@ class RippleParser:
         """
         解析源声明：
         SourceDecl ::= "source" Identifier ":" TypeSignature [ ":=" Expression ] ";"
+                    |  "source" Identifier ":=" Expression ";"
+        类型注解可选，但如果省略则必须有初始值
         """
         self.expect(TokenType.KW_SOURCE)
         name_token = self.expect(TokenType.IDENTIFIER)
         name = name_token.value
 
-        self.expect(TokenType.COLON)
-        type_sig = self.parse_type()
-
+        type_sig = None
         initial_value = None
-        if self.match(TokenType.OP_SOURCE):
+
+        # 检查下一个 token 是 ":" (类型注解) 还是 ":=" (直接赋值)
+        if self.match(TokenType.COLON):
+            # 有类型注解: source name : type ...
+            self.advance()
+            type_sig = self.parse_type()
+
+            # 可选的初始值
+            if self.match(TokenType.OP_SOURCE):
+                self.advance()
+                initial_value = self.parse_expression()
+
+        elif self.match(TokenType.OP_SOURCE):
+            # 无类型注解，直接赋值: source name := value
             self.advance()
             initial_value = self.parse_expression()
+            # type_sig 保持 None，由类型推断器处理
+
+        else:
+            raise ParseError(
+                f"Expected ':' or ':=' after source name at "
+                f"L{self.current_token().line}:C{self.current_token().column}"
+            )
 
         self.expect(TokenType.SEMICOLON)
 
@@ -106,7 +130,7 @@ class RippleParser:
     def parse_stream_decl(self) -> StreamDecl:
         """
         解析流声明：
-        StreamDecl ::= "stream" Identifier "<-" Expression ";"
+        StreamDecl ::= "stream" Identifier "<-" Expression [ "on" Identifier ] ";"
         """
         self.expect(TokenType.KW_STREAM)
         name_token = self.expect(TokenType.IDENTIFIER)
@@ -115,10 +139,22 @@ class RippleParser:
         self.expect(TokenType.OP_BIND)
         expression = self.parse_expression()
 
+        # 解析可选的触发器子句（支持字段访问，如 pos.x）
+        trigger = None
+        if self.match(TokenType.KW_ON):
+            self.advance()
+            trigger_token = self.expect(TokenType.IDENTIFIER)
+            trigger = trigger_token.value
+            # 支持字段访问：on pos.x
+            while self.match(TokenType.DOT):
+                self.advance()
+                field_token = self.expect(TokenType.IDENTIFIER)
+                trigger = f"{trigger}.{field_token.value}"
+
         self.expect(TokenType.SEMICOLON)
 
         # 提取依赖关系和状态信息
-        decl = StreamDecl(name, expression)
+        decl = StreamDecl(name, expression, trigger)
         decl.static_dependencies = extract_dependencies(expression)
         decl.is_stateful = is_stateful_expr(expression)
 
@@ -140,10 +176,82 @@ class RippleParser:
 
         return SinkDecl(name, expression)
 
+    def parse_func_decl(self) -> FuncDecl:
+        """
+        解析函数声明：
+        FuncDecl ::= "func" Identifier "(" [ Identifier { "," Identifier } ] ")" "=" Expression ";"
+        """
+        self.expect(TokenType.KW_FUNC)
+        name_token = self.expect(TokenType.IDENTIFIER)
+        name = name_token.value
+
+        self.expect(TokenType.LPAREN)
+        params = []
+        if not self.match(TokenType.RPAREN):
+            param_token = self.expect(TokenType.IDENTIFIER)
+            params.append(param_token.value)
+
+            while self.match(TokenType.COMMA):
+                self.advance()
+                param_token = self.expect(TokenType.IDENTIFIER)
+                params.append(param_token.value)
+
+        self.expect(TokenType.RPAREN)
+        self.expect(TokenType.EQUALS)
+
+        body = self.parse_expression()
+        self.expect(TokenType.SEMICOLON)
+
+        return FuncDecl(name, params, body)
+
+    def parse_type_decl(self) -> TypeDecl:
+        """
+        解析类型定义：
+        TypeDecl ::= "type" Identifier "=" StructType ";"
+        """
+        self.expect(TokenType.KW_TYPE)
+        name_token = self.expect(TokenType.IDENTIFIER)
+        name = name_token.value
+
+        self.expect(TokenType.EQUALS)
+        type_def = self.parse_struct_type()
+
+        self.expect(TokenType.SEMICOLON)
+
+        return TypeDecl(name, type_def)
+
+    def parse_struct_type(self) -> StructType:
+        """
+        解析结构体类型：
+        StructType ::= "{" [ Identifier ":" Type { "," Identifier ":" Type } ] "}"
+        """
+        self.expect(TokenType.LBRACE)
+        fields = {}
+
+        if not self.match(TokenType.RBRACE):
+            # 第一个字段
+            field_name = self.expect(TokenType.IDENTIFIER).value
+            self.expect(TokenType.COLON)
+            field_type = self.parse_type()
+            fields[field_name] = field_type
+
+            # 后续字段
+            while self.match(TokenType.COMMA):
+                self.advance()
+                if self.match(TokenType.RBRACE):
+                    break  # 允许尾部逗号
+                field_name = self.expect(TokenType.IDENTIFIER).value
+                self.expect(TokenType.COLON)
+                field_type = self.parse_type()
+                fields[field_name] = field_type
+
+        self.expect(TokenType.RBRACE)
+        return StructType(fields)
+
     def parse_type(self) -> TypeNode:
         """
         解析类型：
-        TypeSignature ::= BasicType | StreamType
+        TypeSignature ::= BasicType | StreamType | ArrayType | StructType | Identifier
         """
         if self.match(TokenType.TYPE_STREAM):
             self.advance()
@@ -155,6 +263,19 @@ class RippleParser:
                         TokenType.TYPE_BOOL, TokenType.TYPE_STRING):
             type_token = self.advance()
             return BasicType(type_token.value)
+        elif self.match(TokenType.LBRACKET):
+            # 数组类型 [T]
+            self.advance()
+            element_type = self.parse_type()
+            self.expect(TokenType.RBRACKET)
+            return ArrayType(element_type)
+        elif self.match(TokenType.LBRACE):
+            # 内联结构体类型 { x: int, y: int }
+            return self.parse_struct_type()
+        elif self.match(TokenType.IDENTIFIER):
+            # 自定义类型名（如 Point）
+            type_token = self.advance()
+            return BasicType(type_token.value)  # 作为自定义类型名
         else:
             raise ParseError(f"Expected type at L{self.current_token().line}")
 
@@ -239,7 +360,25 @@ class RippleParser:
             operand = self.parse_unary()
             return UnaryOp(op_token.value, operand)
 
-        return self.parse_primary()
+        return self.parse_postfix()
+
+    def parse_postfix(self) -> Expression:
+        """解析后缀表达式（数组索引访问、字段访问）"""
+        expr = self.parse_primary()
+
+        # 处理连续的后缀操作：arr[0][1], p.x.y, obj.arr[0]
+        while self.match(TokenType.LBRACKET, TokenType.DOT):
+            if self.match(TokenType.LBRACKET):
+                self.advance()
+                index = self.parse_expression()
+                self.expect(TokenType.RBRACKET)
+                expr = ArrayAccess(expr, index)
+            elif self.match(TokenType.DOT):
+                self.advance()
+                field_name = self.expect(TokenType.IDENTIFIER).value
+                expr = FieldAccess(expr, field_name)
+
+        return expr
 
     def parse_primary(self) -> Expression:
         """
@@ -263,9 +402,21 @@ class RippleParser:
             token = self.advance()
             return Literal(token.value, 'bool')
 
+        # 数组字面量
+        if self.match(TokenType.LBRACKET):
+            return self.parse_array_literal()
+
+        # 结构体字面量
+        if self.match(TokenType.LBRACE):
+            return self.parse_struct_literal()
+
         # If 表达式
         if self.match(TokenType.KW_IF):
             return self.parse_if_expression()
+
+        # Let 表达式
+        if self.match(TokenType.KW_LET):
+            return self.parse_let_expression()
 
         # Pre 操作符
         if self.match(TokenType.ID_PRE):
@@ -274,6 +425,18 @@ class RippleParser:
         # Fold 操作符
         if self.match(TokenType.ID_FOLD):
             return self.parse_fold_op()
+
+        # Map 操作符
+        if self.match(TokenType.ID_MAP):
+            return self.parse_map_op()
+
+        # Filter 操作符
+        if self.match(TokenType.ID_FILTER):
+            return self.parse_filter_op()
+
+        # Reduce 操作符
+        if self.match(TokenType.ID_REDUCE):
+            return self.parse_reduce_op()
 
         # Lambda 表达式 或 标识符/函数调用
         if self.match(TokenType.IDENTIFIER):
@@ -330,6 +493,23 @@ class RippleParser:
         self.expect(TokenType.KW_END)
 
         return IfExpression(condition, then_branch, else_branch)
+
+    def parse_let_expression(self) -> LetExpression:
+        """
+        解析 Let 表达式：
+        let name = value in body
+        """
+        self.expect(TokenType.KW_LET)
+        name_token = self.expect(TokenType.IDENTIFIER)
+        name = name_token.value
+
+        self.expect(TokenType.EQUALS)
+        value = self.parse_expression()
+
+        self.expect(TokenType.KW_IN)
+        body = self.parse_expression()
+
+        return LetExpression(name, value, body)
 
     def parse_pre_op(self) -> PreOp:
         """
@@ -392,6 +572,105 @@ class RippleParser:
         body = self.parse_expression()
 
         return Lambda(params, body)
+
+    def parse_array_literal(self) -> ArrayLiteral:
+        """
+        解析数组字面量：
+        [expr1, expr2, ...]
+        """
+        self.expect(TokenType.LBRACKET)
+        elements = []
+
+        if not self.match(TokenType.RBRACKET):
+            elements.append(self.parse_expression())
+            while self.match(TokenType.COMMA):
+                self.advance()
+                # 允许尾部逗号
+                if self.match(TokenType.RBRACKET):
+                    break
+                elements.append(self.parse_expression())
+
+        self.expect(TokenType.RBRACKET)
+        return ArrayLiteral(elements)
+
+    def parse_struct_literal(self) -> StructLiteral:
+        """
+        解析结构体字面量：
+        { field1: expr1, field2: expr2, ... }
+        """
+        self.expect(TokenType.LBRACE)
+        fields = {}
+
+        if not self.match(TokenType.RBRACE):
+            # 第一个字段
+            field_name = self.expect(TokenType.IDENTIFIER).value
+            self.expect(TokenType.COLON)
+            field_value = self.parse_expression()
+            fields[field_name] = field_value
+
+            # 后续字段
+            while self.match(TokenType.COMMA):
+                self.advance()
+                if self.match(TokenType.RBRACE):
+                    break  # 允许尾部逗号
+                field_name = self.expect(TokenType.IDENTIFIER).value
+                self.expect(TokenType.COLON)
+                field_value = self.parse_expression()
+                fields[field_name] = field_value
+
+        self.expect(TokenType.RBRACE)
+        return StructLiteral(fields)
+
+    def parse_map_op(self) -> MapOp:
+        """
+        解析 Map 操作符：
+        map(array, (x) => body)
+        """
+        self.expect(TokenType.ID_MAP)
+        self.expect(TokenType.LPAREN)
+
+        array = self.parse_expression()
+        self.expect(TokenType.COMMA)
+
+        mapper = self.parse_lambda()
+
+        self.expect(TokenType.RPAREN)
+        return MapOp(array, mapper)
+
+    def parse_filter_op(self) -> FilterOp:
+        """
+        解析 Filter 操作符：
+        filter(array, (x) => predicate)
+        """
+        self.expect(TokenType.ID_FILTER)
+        self.expect(TokenType.LPAREN)
+
+        array = self.parse_expression()
+        self.expect(TokenType.COMMA)
+
+        predicate = self.parse_lambda()
+
+        self.expect(TokenType.RPAREN)
+        return FilterOp(array, predicate)
+
+    def parse_reduce_op(self) -> ReduceOp:
+        """
+        解析 Reduce 操作符：
+        reduce(array, initial, (acc, x) => body)
+        """
+        self.expect(TokenType.ID_REDUCE)
+        self.expect(TokenType.LPAREN)
+
+        array = self.parse_expression()
+        self.expect(TokenType.COMMA)
+
+        initial = self.parse_expression()
+        self.expect(TokenType.COMMA)
+
+        accumulator = self.parse_lambda()
+
+        self.expect(TokenType.RPAREN)
+        return ReduceOp(array, initial, accumulator)
 
 
 # 测试代码

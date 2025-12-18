@@ -1,0 +1,88 @@
+// Ripple 语言示例 7: 用户定义函数
+// 展示 func 语法的使用
+
+// 定义简单函数
+func square(x) = x * x;
+func double(x) = x * 2;
+func add(a, b) = a + b;
+
+// 带条件的函数
+func abs_val(x) = if x < 0 then -x else x end;
+func max2(a, b) = if a > b then a else b end;
+func min2(a, b) = if a < b then a else b end;
+
+// 复合函数（函数可以调用其他函数）
+func sum_of_squares(a, b) = add(square(a), square(b));
+
+// 输入源
+source x : int := 3;
+source y : int := 4;
+
+// 使用函数
+stream x_squared <- square(x);
+stream x_doubled <- double(x);
+stream x_plus_y <- add(x, y);
+stream abs_diff <- abs_val(add(x, -y));
+stream max_xy <- max2(x, y);
+stream min_xy <- min2(x, y);
+stream sos <- sum_of_squares(x, y);
+
+// ========== 作用域测试 ==========
+// 函数参数会遮蔽外部同名变量
+
+// 这个函数的参数 x 会遮蔽外部的 source x
+func shadow_test(x) = x * 10;
+
+// 调用 shadow_test(5)，参数 x=5 遮蔽了外部 x=3
+// 所以结果是 50，不是 30
+stream shadow_result <- shadow_test(5);
+sink shadow_out <- shadow_result;
+
+// 注意：函数不能访问外部变量（除非通过参数传入）
+// 下面这样写会报错：
+// func bad_func() = x + 1;  // 错误：x not found
+
+// ========== 递归函数 ==========
+// 函数可以调用自身（递归在求值时发生，不影响依赖图）
+
+func factorial(n) = if n <= 1 then 1 else n * factorial(n - 1) end;
+func fib(n) = if n <= 1 then n else fib(n - 1) + fib(n - 2) end;
+
+stream fact_x <- factorial(x);
+stream fib_y <- fib(y);
+
+sink fact_out <- fact_x;
+sink fib_out <- fib_y;
+
+// ========== let 局部变量 ==========
+// let name = value in body 用于定义临时变量
+
+func distance(x1, y1, x2, y2) =
+    let dx = x2 - x1 in
+    let dy = y2 - y1 in
+    sqrt(dx * dx + dy * dy);
+
+stream dist <- distance(0, 0, x, y);
+sink dist_out <- dist;
+
+// 输出
+sink squared_out <- x_squared;
+sink doubled_out <- x_doubled;
+sink sum_out <- x_plus_y;
+sink abs_diff_out <- abs_diff;
+sink max_out <- max_xy;
+sink min_out <- min_xy;
+sink sos_out <- sos;
+
+// 当 x=3, y=4 时：
+// x_squared = 9
+// x_doubled = 6
+// x_plus_y = 7
+// abs_diff = 1 (|3-4| = 1)
+// max_xy = 4
+// min_xy = 3
+// sos = 25 (3^2 + 4^2 = 9 + 16 = 25)
+// shadow_result = 50 (参数 x=5 遮蔽外部 x=3)
+// fact_x = 6 (3! = 6)
+// fib_y = 3 (fib(4) = 3)
+// dist = 5.0 (distance(0,0,3,4) = 5)

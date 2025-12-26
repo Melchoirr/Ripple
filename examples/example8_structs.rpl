@@ -1,60 +1,28 @@
-// Ripple 语言示例 8: 结构体支持
-// 展示类型定义、结构体字面量、字段访问和字段级更新
+// Example 8: Struct Types
+// Demonstrates type definitions, field access, and struct literals
 
-// ========== 类型定义 ==========
 type Point = { x: int, y: int };
-type Rectangle = { topLeft: Point, width: int, height: int };
 
-// ========== 结构体源 ==========
-// 结构体源会被展开为字段节点：p.x, p.y
-// 同时创建虚拟的整体节点 p
 source p : Point := { x: 3, y: 4 };
 
-// ========== 字段访问 ==========
-// 依赖单个字段：只有当 p.x 变化时才更新
+// Field access
 stream px <- p.x;
 stream py <- p.y;
 
-// ========== 使用结构体字段 ==========
+// Computation using fields
 func square(n) = n * n;
 stream distance <- sqrt(square(p.x) + square(p.y));
 
-// ========== 整体访问 ==========
-// 依赖整个结构体（所有字段）
-stream point_copy <- p;
-
-// ========== 从流构建结构体 ==========
+// Create new struct from streams
 source a : int := 10;
-source b : int := 20;
-stream new_point <- { x: a, y: b };
+stream doubled <- { x: p.x * 2, y: p.y * 2 };
+stream new_point <- { x: a, y: a + 5 };
 
-// ========== 结构体字段运算 ==========
-stream doubled_point <- { x: p.x * 2, y: p.y * 2 };
-
-// ========== 输出 ==========
 sink px_out <- px;
 sink py_out <- py;
-sink distance_out <- distance;
-sink point_copy_out <- point_copy;
-sink new_point_out <- new_point;
-sink doubled_point_out <- doubled_point;
+sink dist_out <- distance;
+sink doubled_out <- doubled;
+sink new_out <- new_point;
 
-// ========== 预期输出 ==========
-// 初始状态 (p = {x: 3, y: 4}, a = 10, b = 20):
-// px = 3
-// py = 4
-// distance = 5.0 (sqrt(9 + 16))
-// point_copy = {x: 3, y: 4}
-// new_point = {x: 10, y: 20}
-// doubled_point = {x: 6, y: 8}
-
-// ========== 字段级更新测试 ==========
-// push_event("p.x", 6):
-//   - px 更新为 6
-//   - distance 更新为 sqrt(36+16) = 7.21...
-//   - doubled_point 更新为 {x: 12, y: 8}
-//   - py 不变（只依赖 p.y）
-//
-// push_event("p", {x: 0, y: 0}):
-//   - 更新所有字段节点 p.x 和 p.y
-//   - 所有依赖 p.x 或 p.y 的流都更新
+// p={x:3,y:4}: px=3, py=4, distance=5.0, doubled={x:6,y:8}
+// Field-level update: p.x=6 only updates px and distance

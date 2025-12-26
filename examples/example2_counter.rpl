@@ -1,23 +1,23 @@
-// Ripple 语言示例 2: 计数器（使用 Pre 操作符和显式触发器）
-// 展示时序操作符 pre 和 on 触发器语法的使用
+// Example 2: Time Operators (pre + on trigger)
+// Demonstrates temporal operators and explicit triggers
 
-// 输入源：触发信号
 source tick : int := 0;
 
-// 计数器：每次 tick 更新时加 1
-// pre(counter, 0) 表示访问 counter 在前一时刻的值，初始值为 0
-// on tick 表示当 tick 变化时触发 counter 更新
+// Counter: increments on each tick event
+// pre(x, init) returns previous value, init if first time
 stream counter <- pre(counter, 0) + 1 on tick;
 
-// 偶数计数器：只在偶数时刻递增
-stream even_counter <- if counter % 2 == 0 then pre(even_counter, 0) + 1 else pre(even_counter, 0) end on tick;
+// Even counter: only increments when counter is even
+stream even_count <-
+    if counter % 2 == 0
+        then pre(even_count, 0) + 1
+        else pre(even_count, 0)
+    end on tick;
 
-// 输出
-sink count_output <- counter;
-sink even_output <- even_counter;
+sink counter_out <- counter;
+sink even_out <- even_count;
 
-// 时间步进（每次推送 tick 事件）：
-// t=0: counter=1, even_counter=0 (初始值)
-// t=1: counter=2, even_counter=1
-// t=2: counter=3, even_counter=1
-// t=3: counter=4, even_counter=2
+// tick=0: counter=1, even_count=0
+// tick=1: counter=2, even_count=1
+// tick=2: counter=3, even_count=1
+// tick=3: counter=4, even_count=2

@@ -1,0 +1,389 @@
+\section{语法设计}
+
+\subsection{词法设计（Lexical Analysis）}
+\paragraph{关键字与保留字} 词法阶段将以下字符串识别为关键字，禁止被当作标识符使用：
+$$
+\{
+\texttt{stream, source, sink, lift, if, then, else, end, match, with, on,}
+$$
+$$
+\texttt{func, let, in, type, pre, fold, map, filter, reduce, int, float,}
+$$
+$$
+\texttt{bool, string, Stream, true, false}
+\}
+$$
+
+\paragraph{标识符} 使用正则 \verb|[A-Za-z_][A-Za-z0-9_]*|。若命中关键字表则归类为对应关键字 Token，否则归类为 \verb|IDENTIFIER|。
+
+\paragraph{数字字面量} 支持十进制整数与浮点：
+\begin{itemize}
+  \item 整数：\verb|[0-9]+|，产出 \verb|INT_LITERAL|。
+  \item 浮点：\verb|[0-9]+\.[0-9]+|（仅单个小数点），产出 \verb|FLOAT_LITERAL|。
+\end{itemize}
+
+\paragraph{字符串字面量} 双引号包围，支持常见转义：\verb|"([^"\\]|\\.)*"|，产出 \verb|STRING_LITERAL|。
+
+\paragraph{布尔字面量} \verb|true|/\verb|false| 直接映射为 \verb|BOOL_LITERAL|。
+
+\paragraph{运算符与分隔符} 由最长优先规则匹配：
+\begin{itemize}
+  \item 二字符及以上：\verb|<-|（流绑定）、\verb|:=|（源初始化）、\verb|~>|（流向）、\verb|==|、\verb|!=|、\verb|<=|、\verb|>=|、\verb|&&|、\verb||||、\verb|=>|（Lambda）、\verb|=|（函数定义）、\verb|<-| 后的 \verb|on| 触发器。
+  \item 单字符：\verb|+ - * / % < > ! ( ) { } [ ] , ; : .|.
+\end{itemize}
+
+\paragraph{注释与空白} 单行注释以 \verb|//| 开始至行尾。空格、制表符、回车被跳过。换行仅用于行列计数，不参与语法（\verb|NEWLINE| 仅保留定位信息）。
+
+\paragraph{Token 序列} 词法器输出 Token 序列并在结尾追加 \verb|EOF|，供递归下降解析器消费。
+
+\subsection{语法规则（Grammar, EBNF）}
+Ripple 采用自顶向下递归下降解析，按运算符优先级拆分子产生式。下述 EBNF 与 \verb|ripple_parser.py| 完全一致（从最低到最高优先级列出）。
+
+\paragraph{顶层与声明}
+\begin{verbatim}
+Program        ::= { Statement } EOF ;
+Statement      ::= SourceDecl | StreamDecl | SinkDecl
+                 | FuncDecl | TypeDecl ;
+
+SourceDecl     ::= "source" Identifier ":" TypeSignature
+                   [ ":=" Expression ] ";"
+                 | "source" Identifier ":=" Expression ";" ;
+
+StreamDecl     ::= "stream" Identifier "<-" Expression
+                   [ "on" Identifier { "." Identifier } ] ";" ;
+
+SinkDecl       ::= "sink"   Identifier "<-" Expression ";" ;
+
+FuncDecl       ::= "func" Identifier "(" [ Identifier 
+                    { "," Identifier } ] ")" "=" Expression ";" ;
+
+TypeDecl       ::= "type" Identifier "=" StructType ";" ;
+\end{verbatim}
+
+\paragraph{类型系统}
+\begin{verbatim}
+TypeSignature  ::= BasicType | StreamType | ArrayType
+                 | StructType | Identifier ;
+BasicType      ::= "int" | "float" | "bool" | "string" ;
+StreamType     ::= "Stream" "<" TypeSignature ">" ;
+ArrayType      ::= "[" TypeSignature "]" ;
+StructType     ::= "{" [ Identifier ":" TypeSignature
+                   { "," Identifier ":" TypeSignature } ] "}" ;
+\end{verbatim}
+
+\paragraph{表达式（运算符优先级从低到高）}
+\begin{verbatim}
+Expression     ::= LogicalOr ;
+LogicalOr      ::= LogicalAnd { "||" LogicalAnd } ;
+LogicalAnd     ::= Equality   { "&&" Equality   } ;
+Equality       ::= Comparison { ("==" | "!=") Comparison } ;
+Comparison     ::= Additive   { ("<" | ">" | "<=" | ">=") Additive } ;
+Additive       ::= Multiplicative { ("+" | "-") Multiplicative } ;
+Multiplicative ::= Unary { ("*" | "/" | "%") Unary } ;
+Unary          ::= ("!" | "-") Unary | Postfix ;
+Postfix        ::= Primary { "[" Expression "]"
+                           | "." Identifier } ;
+\end{verbatim}
+
+\paragraph{基础与高阶表达式}
+\begin{verbatim}
+Primary        ::= Literal
+                 | Identifier
+                 | FunctionCall
+                 | IfExpr
+                 | LetExpr
+                 | PreOp
+                 | FoldOp
+                 | MapOp
+                 | FilterOp
+                 | ReduceOp
+                 | LambdaExpr
+                 | "(" Expression ")" ;
+
+FunctionCall   ::= Identifier "(" [ Expression { "," 
+
+Expression } ] ")" ;
+IfExpr         ::= "if" Expression "then" Expression
+                   "else" Expression "end" ;
+LetExpr        ::= "let" Identifier "=" Expression
+                   "in" Expression ;
+PreOp          ::= "pre" "(" Identifier "," Expression ")" ;
+FoldOp         ::= "fold" "(" Expression "," Expression ","
+                   LambdaExpr ")" ;
+MapOp          ::= "map" "(" Expression "," LambdaExpr ")" ;
+FilterOp       ::= "filter" "(" Expression "," LambdaExpr ")" ;
+ReduceOp       ::= "reduce" "(" Expression "," Expression ","
+                   LambdaExpr ")" ;
+LambdaExpr     ::= "(" [ Identifier { "," Identifier } ] ")" "=>"
+                   Expression ;
+
+(* 内置函数 - 通过 FunctionCall 调用 *)
+BuiltinFunc    ::= (* 数组操作 *)
+                   "len" | "head" | "tail" | "last" | "reverse"
+                 | "transpose"
+                   (* 聚合函数 *)
+                 | "sum" | "avg" | "min" | "max"
+                 | "count" | "count_if"
+                   (* 数学函数 *)
+                 | "abs" | "sqrt"
+                   (* CSV 函数 *)
+                 | "load_csv" | "col" | "row" | "csv_header" ;
+
+Literal        ::= INT_LITERAL | FLOAT_LITERAL
+                 | STRING_LITERAL | BOOL_LITERAL ;
+Identifier     ::= see lexical rules ;
+\end{verbatim}
+
+\paragraph{完整性说明}
+该 EBNF 覆盖所有实现特性：
+\begin{itemize}
+  \item 带触发器的流声明（\verb|on a.b|）
+  \item 数组/结构体类型与字面量、字段访问链
+  \item Lambda 形参数量不限
+  \item map/filter/reduce 高阶数组操作
+  \item let 表达式的局部作用域
+  \item pre/fold 时序原语
+\end{itemize}
+
+内置函数包括：
+\begin{itemize}
+  \item 数组操作：\verb|len|、\verb|head|、\verb|tail|、\verb|last|、
+        \verb|reverse|、\verb|transpose|
+  \item 聚合函数：\verb|sum|、\verb|avg|、\verb|min|、\verb|max|、
+        \verb|count|、\verb|count_if|
+  \item 数学函数：\verb|abs|、\verb|sqrt|
+  \item CSV 函数：\verb|load_csv|、\verb|col|、\verb|row|、\verb|csv_header|
+\end{itemize}
+
+解析过程中，\verb|StreamDecl| 还会调用 \verb|extract_dependencies| 和
+\verb|is_stateful_expr| 计算静态依赖、拓扑高度与有状态标记，
+为调度器提供元数据。
+
+\subsection{抽象语法树（AST）设计}
+\paragraph{节点族与元数据} AST 在 \verb|ripple_ast.py| 中分三类：
+\begin{itemize}
+  \item \textbf{类型节点：} \verb|BasicType|、\verb|StreamType|、
+        \verb|ArrayType|、\verb|StructType|、\verb|FunctionType|。
+  \item \textbf{表达式节点：} \verb|Literal|、\verb|Identifier|、
+        \verb|UnaryOp|、\verb|BinaryOp|、\verb|FunctionCall|、
+        \verb|IfExpression|、\verb|LetExpression|、\verb|Lambda|、
+        \verb|PreOp|、\verb|FoldOp|、\verb|MapOp|、\verb|FilterOp|、
+        \verb|ReduceOp|、\verb|ArrayLiteral|、\verb|ArrayAccess|、
+        \verb|StructLiteral|、\verb|FieldAccess|。
+  \item \textbf{声明节点：} \verb|SourceDecl|、\verb|StreamDecl|、
+        \verb|SinkDecl|、\verb|FuncDecl|、\verb|TypeDecl|，
+        程序根节点为 \verb|Program|。
+\end{itemize}
+其中 \verb|SourceDecl|/\verb|StreamDecl|/\verb|SinkDecl| 携带
+\verb|rank|、\verb|is_stateful|、\verb|static_dependencies| 等拓扑元信息，
+供运行时调度（\verb|ripple_engine.py|）直接使用。
+
+\paragraph{示例 AST 图} 三段具有代表性的代码，展示 AST 及拓扑元数据。
+
+\textbf{示例 1：无状态菱形依赖}
+\begin{verbatim}
+source A : int := 1;
+stream B <- A * 2;
+stream C <- A + 1;
+stream D <- B + C;
+sink output <- D;
+\end{verbatim}
+\begin{figure}[h]
+\centering
+\begin{forest}
+for tree={
+  grow'=east,
+  parent anchor=east,
+  child anchor=west,
+  draw,
+  rounded corners,
+  align=center,
+  font=\small,
+  edge={-Latex},
+  s sep=7mm,
+  l sep=8mm,
+  anchor=center
+},
+decl/.style={fill=blue!10},
+sink/.style={fill=orange!10},
+source/.style={fill=green!15},
+stream/.style={fill=purple!10},
+expr/.style={fill=white}
+[Program, decl
+  [{SourceDecl\\name=A\\type=int\\rank=0\\stateful=false}, source
+    [{Literal\\1:int}, expr]
+  ]
+  [{StreamDecl\\name=B\\rank=1\\stateful=false}, stream
+    [{BinaryOp\\(* )}, expr
+      [{Identifier\\A}, expr]
+      [{Literal\\2:int}, expr]
+    ]
+  ]
+  [{StreamDecl\\name=C\\rank=1\\stateful=false}, stream
+    [{BinaryOp\\(+ )}, expr
+      [{Identifier\\A}, expr]
+      [{Literal\\1:int}, expr]
+    ]
+  ]
+  [{StreamDecl\\name=D\\rank=2\\stateful=false}, stream
+    [{BinaryOp\\(+ )}, expr
+      [{Identifier\\B}, expr]
+      [{Identifier\\C}, expr]
+    ]
+  ]
+  [{SinkDecl\\name=output}, sink
+    [{Identifier\\D}, expr]
+  ]
+]
+\end{forest}
+\caption{示例 1：无状态菱形依赖 AST}
+\end{figure}
+
+\textbf{示例 2：有状态折叠与条件分支}
+\begin{verbatim}
+source tick : int := 1;
+stream count <- fold(tick, 0, (acc, x) => acc + x);
+stream parity <- if count % 2 == 0 then "even" else "odd" end;
+sink result <- parity;
+\end{verbatim}
+
+\begin{figure}[h]
+\centering
+\begin{forest}
+for tree={
+  grow'=east,
+  parent anchor=east,
+  child anchor=west,
+  draw,
+  rounded corners,
+  align=center,
+  font=\small,
+  edge={-Latex},
+  s sep=7mm,
+  l sep=8mm,
+  anchor=center
+},
+decl/.style={fill=blue!10},
+sink/.style={fill=orange!10},
+source/.style={fill=green!15},
+stream/.style={fill=purple!10},
+expr/.style={fill=white}
+[Program, decl
+  [{SourceDecl\\name=tick\\type=int\\rank=0\\stateful=false}, source
+    [{Literal\\1:int}, expr]
+  ]
+  [{StreamDecl\\name=count\\rank=1\\stateful=true}, stream
+    [{FoldOp}, expr
+      [{Identifier\\tick}, expr]
+      [{Literal\\0:int}, expr]
+      [{Lambda\\(acc, x) => acc + x}, expr
+        [{BinaryOp\\(+)}, expr
+          [{Identifier\\acc}, expr]
+          [{Identifier\\x}, expr]
+        ]
+      ]
+    ]
+  ]
+  [{StreamDecl\\name=parity\\rank=2\\stateful=false}, stream
+    [{IfExpression}, expr
+      [{BinaryOp\\(==)}, expr
+        [{BinaryOp\\( \% )}, expr  % 注意这里必须用 \% 转义
+          [{Identifier\\count}, expr]
+          [{Literal\\2:int}, expr]
+        ]
+        [{Literal\\0:int}, expr]
+      ]
+      [{Literal\\"even":string}, expr]
+      [{Literal\\"odd":string}, expr]
+    ]
+  ]
+  [{SinkDecl\\name=result}, sink
+    [{Identifier\\parity}, expr]
+  ]
+]
+\end{forest}
+\caption{示例 2：fold 状态累积 + 条件分支 AST}
+\end{figure}
+
+\textbf{示例 3：高阶数组操作与 Lambda（较高复杂度）}
+\begin{verbatim}
+source numbers : [int] := [1,2,3,4,5];
+stream squares <- map(numbers, (x) => x * x);
+stream evens <- filter(squares, (x) => x % 2 == 0);
+stream total <- reduce(evens, 0, (acc, x) => acc + x);
+sink output <- total;
+\end{verbatim}
+
+\begin{figure}[htbp]
+\centering
+\makebox[\textwidth][c]{
+\begin{forest}
+for tree={
+  grow'=east,
+  parent anchor=east,
+  child anchor=west,
+  draw,
+  rounded corners,
+  align=center,
+  font=\small,
+  edge={-Latex},
+  s sep=7mm,
+  l sep=4mm,
+  anchor=center
+},
+decl/.style={fill=blue!10},
+sink/.style={fill=orange!10},
+source/.style={fill=green!15},
+stream/.style={fill=purple!10},
+expr/.style={fill=white}
+[Program, decl
+  [{SourceDecl\\name=numbers\\type=\texttt{[int]}\\rank=0\\stateful=false}, source
+    [{ArrayLiteral\\\texttt{[1,2,3,4,5]}}, expr]
+  ]
+  [{StreamDecl\\name=squares\\rank=1\\stateful=false}, stream
+    [{MapOp}, expr
+      [{Identifier\\numbers}, expr]
+      [{Lambda\\(x) => x * x}, expr
+        [{BinaryOp\\(* )}, expr
+          [{Identifier\\x}, expr]
+          [{Identifier\\x}, expr]
+        ]
+      ]
+    ]
+  ]
+  [{StreamDecl\\name=evens\\rank=2\\stateful=false}, stream
+    [{FilterOp}, expr
+      [{Identifier\\squares}, expr]
+      [{Lambda\\(x) => \\ x \% 2 == 0}, expr
+        [{BinaryOp\\(==)}, expr
+          [{BinaryOp\\( \% )}, expr
+            [{Identifier\\x}, expr]
+            [{Literal\\2:int}, expr]
+          ]
+          [{Literal\\0:int}, expr]
+        ]
+      ]
+    ]
+  ]
+  [{StreamDecl\\name=total\\rank=3\\stateful=false}, stream
+    [{ReduceOp}, expr
+      [{Identifier\\evens}, expr]
+      [{Literal\\0:int}, expr]
+      [{Lambda\\(acc,x) => acc + x}, expr
+        [{BinaryOp\\(+ )}, expr
+          [{Identifier\\acc}, expr]
+          [{Identifier\\x}, expr]
+        ]
+      ]
+    ]
+  ]
+  [{SinkDecl\\name=output}, sink
+    [{Identifier\\total}, expr]
+  ]
+]
+\end{forest}
+}
+\caption{示例 3：Map/Filter/Reduce + Lambda AST}
+\end{figure}
+
+\paragraph{语义附着} \verb|extract_dependencies| 将字段访问折叠为完整路径（如 \verb|pos.x|），\verb|is_stateful_expr| 递归识别 \verb|pre|/\verb|fold|，使语法树直接携带调度所需的静态信息。这一设计将“语法结构”与“执行拓扑”对齐，确保编译期即可生成无故障传播所需的运行时蓝图。

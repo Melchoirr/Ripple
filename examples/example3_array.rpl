@@ -1,56 +1,22 @@
-// Ripple 语言示例 3: 数组操作
-// 展示数组字面量、索引访问、map/filter/reduce 操作
+// Example 3: Array Operations (map, filter, reduce)
+// Demonstrates high-order array functions and built-ins
 
-// 输入源
-source x : int := 2;
+source x : int := 3;
 
-// 数组字面量：包含表达式，会响应 x 的变化
-stream arr <- [x, x * 2, x * 3];
+stream arr <- [x, x * 2, x * 3];    // [3, 6, 9]
 
-// 索引访问
-stream first <- arr[0];
-stream second <- arr[1];
-stream third <- arr[2];
+// High-order functions
+stream doubled <- map(arr, (n) => n * 2);              // [6, 12, 18]
+stream evens <- filter(arr, (n) => n % 2 == 0);        // [6]
+stream total <- reduce(arr, 0, (acc, n) => acc + n);   // 18
 
-// 内置函数
-stream length <- len(arr);
-stream total <- sum(arr);
+// Built-in array functions
+stream length <- len(arr);          // 3
+stream first <- head(arr);          // 3
+stream rest <- tail(arr);           // [6, 9]
 
-// map: 对每个元素乘以 2
-stream doubled <- map(arr, (n) => n * 2);
-
-// filter: 过滤出偶数
-stream evens <- filter(arr, (n) => n % 2 == 0);
-
-// reduce: 求和（与 sum 等价）
-stream reduced_sum <- reduce(arr, 0, (acc, n) => acc + n);
-
-// 复合操作：先过滤再求和
-stream filtered_sum <- reduce(filter(arr, (n) => n > 3), 0, (acc, n) => acc + n);
-
-// 输出
 sink arr_out <- arr;
-sink first_out <- first;
-sink length_out <- length;
-sink total_out <- total;
 sink doubled_out <- doubled;
 sink evens_out <- evens;
-sink filtered_sum_out <- filtered_sum;
-
-// 当 x=2 时：
-// arr = [2, 4, 6]
-// first = 2
-// length = 3
-// total = 12
-// doubled = [4, 8, 12]
-// evens = [2, 4, 6] (全是偶数)
-// filtered_sum = 10 (4+6, 只有 >3 的元素)
-
-// 当 x=3 时：
-// arr = [3, 6, 9]
-// first = 3
-// length = 3
-// total = 18
-// doubled = [6, 12, 18]
-// evens = [6] (只有 6 是偶数)
-// filtered_sum = 15 (6+9, 只有 >3 的元素)
+sink total_out <- total;
+sink length_out <- length;

@@ -21,6 +21,10 @@ Ripple 是一种实验性的响应式编程语言，旨在从语言层面解决�
 - **🕐 隐式时间轴**: 无需显式订阅/取消订阅，时间被抽象为流的自然属性
 - **📊 声明式语法**: 类似电子表格的直观编程模型
 - **⚠️ 完整错误检测**: 编译期捕获循环依赖、未定义引用、重复定义等错误
+- **🔍 类型推断**: 自动推断变量类型，减少冗余注解
+- **📁 CSV 数据处理**: 内置 CSV 文件加载与统计函数
+- **👁️ 文件监听**: 自动监听 CSV 文件变化，实时更新计算结果
+- **🌳 AST 可视化**: 支持树形、DOT、JSON 多种格式输出
 
 ---
 
@@ -79,6 +83,21 @@ python ripple_runner.py hello.rpl
 
 这展示了 Ripple 的核心特性：当 `A` 变为 5 时，`B` 自动更新为 10，`C` 自动更新为 6，`D` 自动计算为 16，**并且只计算一次**，不会出现中间错误状态。
 
+### 交互模式命令
+
+| 命令 | 说明 |
+|------|------|
+| `source = value` | 向源节点推送值 |
+| `graph` | 显示依赖图结构 |
+| `outputs` | 显示当前所有输出 |
+| `sources` | 列出所有源节点 |
+| `watch` | 开启/关闭 CSV 文件监听 |
+| `ast` | 显示 AST（树形） |
+| `ast dot` | 显示 AST（DOT 格式）并保存 |
+| `ast json` | 显示 AST（JSON 格式） |
+| `help` | 显示帮助 |
+| `quit` | 退出程序 |
+
 ---
 
 ## 语言特性
@@ -130,6 +149,144 @@ stream counter <- pre(counter, 0) + 1;
 source numbers : int := 0;
 stream sum <- fold(numbers, 0, (acc, x) => acc + x);
 ```
+
+### 4. CSV 数据处理
+
+Ripple 内置了 CSV 文件处理功能，支持加载、查询和统计。
+
+#### 加载 CSV 文件
+
+```ripple
+// 加载 CSV，第二个参数表示是否跳过表头
+source data := load_csv("data/employees.csv", true);
+
+// 获取表头
+stream headers <- csv_header("data/employees.csv");
+```
+
+#### 数据访问
+
+```ripple
+// 获取指定列（0-indexed）
+stream ages <- col(data, 1);       // 第2列
+stream names <- col(data, 0);      // 第1列
+
+// 获取指定行
+stream first_row <- row(data, 0);  // 第1行
+```
+
+#### 统计函数
+
+```ripple
+// 基础统计
+stream row_count <- len(data);           // 行数
+stream avg_age <- avg(col(data, 1));     // 平均值
+stream total <- sum(col(data, 2));       // 求和
+stream max_val <- max(col(data, 2));     // 最大值
+stream min_val <- min(col(data, 2));     // 最小值
+
+// 条件统计
+stream active_count <- count_if(data, (row) => row[3] == true);
+stream high_salary <- count_if(data, (row) => row[2] > 5000);
+```
+
+#### 数据过滤
+
+```ripple
+// 过滤满足条件的行
+stream active_users <- filter(data, (row) => row[3] == true);
+stream seniors <- filter(data, (row) => row[1] > 30);
+```
+
+#### 完整示例
+
+```ripple
+// 员工数据分析
+source employees := load_csv("data/employees.csv", true);
+
+stream total_employees <- len(employees);
+stream avg_salary <- avg(col(employees, 2));
+stream active_employees <- filter(employees, (row) => row[3]);
+stream active_count <- len(active_employees);
+
+sink report_total <- total_employees;
+sink report_avg_salary <- avg_salary;
+sink report_active <- active_count;
+```
+
+### 5. 文件监听（实时更新）
+
+在交互模式下，可以启用 CSV 文件监听，当文件内容变化时自动更新计算结果：
+
+```bash
+python ripple_runner.py examples/example9_csv.rpl
+```
+
+```
+> watch
+[文件监听] 已启动，监听 1 个文件
+
+# 此时修改 CSV 文件并保存，输出会自动更新：
+[文件监听] 检测到 'data/employees.csv' 变化，重新加载...
+  加载了 10 行数据
+
+当前输出：
+  report_total = 10
+  report_avg_salary = 5500.0
+```
+
+支持同时监听多个 CSV 文件：
+
+```ripple
+source users := load_csv("data/users.csv", true);
+source orders := load_csv("data/orders.csv", true);
+source products := load_csv("data/products.csv", true);
+
+// 所有文件都会被自动监听
+```
+
+### 6. AST 可视化
+
+Ripple 支持三种 AST 可视化格式：
+
+#### 命令行模式
+
+```bash
+# 树形格式
+python ripple_runner.py examples/example1_diamond.rpl --ast tree
+
+# Graphviz DOT 格式
+python ripple_runner.py examples/example1_diamond.rpl --ast dot
+
+# JSON 格式
+python ripple_runner.py examples/example1_diamond.rpl --ast json
+```
+
+#### 交互模式
+
+```
+> ast           # 显示树形 AST
+> ast tree      # 显示树形 AST
+> ast dot       # 显示 DOT 格式并保存文件
+> ast json      # 显示 JSON 格式
+```
+
+#### DOT 文件转换
+
+生成的 `.dot` 文件可以用 Graphviz 转换为图片：
+
+```bash
+# 安装 Graphviz
+brew install graphviz
+
+# 转换为 PNG
+dot -Tpng example_ast.dot -o example_ast.png
+
+# 转换为 SVG
+dot -Tsvg example_ast.dot -o example_ast.svg
+```
+
+或使用在线工具：https://dreampuf.github.io/GraphvizOnline/
 
 ---
 
@@ -189,20 +346,25 @@ adsl/
 ├── ripple_lexer.py          # 词法分析器
 ├── ripple_ast.py            # AST 节点定义
 ├── ripple_parser.py         # 语法分析器
-├── ripple_engine.py         # 图归约引擎
-├── ripple_compiler.py       # 编译器（带错误检测）
+├── ripple_engine.py         # 图归约引擎 + CSV 处理
+├── ripple_compiler.py       # 编译器（带错误检测 + 类型推断）
+├── ripple_typechecker.py    # 类型推断系统
 ├── ripple_errors.py         # 错误处理系统
 ├── ripple_runner.py         # 交互式运行器
+├── ripple_ast_visualizer.py # AST 可视化器
+├── ripple_watcher.py        # CSV 文件监听器
 ├── demo.py                  # 演示程序
 ├── test_error_handling.py   # 测试套件
 │
 ├── examples/                # 示例代码
-│   ├── example1_diamond.rpl
-│   ├── example2_counter.rpl
-│   ├── example3_fold.rpl
-│   ├── example4_conditional.rpl
-│   ├── example5_complex.rpl
-│   └── error_examples.rpl
+│   ├── example1_diamond.rpl     # 菱形依赖
+│   ├── example2_counter.rpl     # 计数器
+│   ├── example3_fold.rpl        # 折叠操作
+│   ├── example4_conditional.rpl # 条件表达式
+│   ├── example5_complex.rpl     # 复杂示例
+│   ├── example9_csv.rpl         # CSV 数据处理
+│   ├── test_data.csv            # 测试 CSV 数据
+│   └── error_examples.rpl       # 错误示例
 │
 └── 文档
     ├── README.md            # 本文件
@@ -263,24 +425,34 @@ A=5 -> B=10, C=6, D=16 ✓
 ```
 源代码 (.rpl)
     ↓
-[1] 词法分析
+[1] 词法分析 → Tokens
     ↓
-[2] 语法分析
+[2] 语法分析 → AST
     ↓
-[3] 检查重复定义 ⚠️
+[3] 类型定义编译
     ↓
-[4] 检查未定义引用 ⚠️
+[4] 函数定义编译
     ↓
-[5] 检查循环依赖 ⚠️
+[5] 类型推断与检查 🔍
     ↓
-[6] 计算拓扑顺序
+[6] 检查重复定义 ⚠️
     ↓
-[7] 代码生成
+[7] 检查未定义引用 ⚠️
     ↓
-✓ 响应式执行
+[8] 检查循环依赖 ⚠️
+    ↓
+[9] 计算拓扑顺序
+    ↓
+[10] 编译源/流/输出节点
+    ↓
+[11] 初始化依赖图
+    ↓
+✓ 响应式执行引擎
 ```
 
 **原则**：早期失败 - 一旦发现错误立即停止编译。
+
+**编译输出**：Ripple 不生成传统的字节码或机器码，而是生成**响应式依赖图**，由运行时引擎执行。
 
 ---
 
@@ -394,18 +566,27 @@ stream action <- if status == "hot" then "Turn on AC"
 
 ---
 
+## 已实现特性
+
+- ✅ 类型推断系统
+- ✅ 用户自定义函数
+- ✅ CSV 数据处理
+- ✅ 文件监听与实时更新
+- ✅ AST 可视化（树形/DOT/JSON）
+- ✅ Lambda 表达式
+- ✅ 高阶函数（map, filter, fold）
+
 ## 未来工作
 
 根据设计文档，以下特性待实现：
 
-1. **完整类型系统**
-   - 类型推导
+1. **类型系统增强**
    - 泛型支持
+   - 更完善的类型错误报告
 
 2. **高级特性**
    - 高阶流（Stream of Streams）
-   - Match 表达式
-   - 用户自定义函数
+   - Match 表达式（模式匹配）
 
 3. **性能优化**
    - Slab 内存分配器
@@ -414,7 +595,7 @@ stream action <- if status == "hot" then "Turn on AC"
 4. **工具链**
    - 时间旅行调试器
    - LTL 断言验证
-   - IDE 插件
+   - IDE 插件（VSCode/IntelliJ）
 
 ---
 

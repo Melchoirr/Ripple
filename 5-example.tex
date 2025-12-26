@@ -1,0 +1,303 @@
+\section{语言特性展示与代码示例}
+本章选取了若干覆盖核心语法语义的代表性程序，逐一进行分析。
+所有示例均可直接用 \verb|python ripple_runner.py <file.rpl>| 运行，
+或通过 \verb|RippleCompiler().run(code)| 在 Python 中嵌入执行。
+示例对应源码位置：\verb|examples/*.rpl|、\verb|test_comprehensive.py|，
+可随时交叉验证。
+
+\subsection{基础功能：变量、算术与 I/O 输出}
+以下程序验证最小闭环：源定义、算术表达式、Sink 输出与事件传播。
+\begin{verbatim}
+// 基础功能演示
+source a : int := 1;
+source b : float := 2.5;
+
+// 四则与比较
+stream sum        <- a + b;              // 混合数值 -> float
+stream expr       <- (a * 3 + 4) - b;    // 优先级与括号
+stream equal_test <- a * 2 == 2 * a;     // 布尔结果
+
+// I/O 输出
+sink sum_out   <- sum;
+sink expr_out  <- expr;
+sink bool_out  <- equal_test;
+\end{verbatim}
+\paragraph{行为分析}
+\begin{itemize}
+  \item \textbf{初值求值：}
+        编译时源 \verb|a|/\verb|b| 绑定存储，
+        Sink 依赖图 rank 分别为 1（\verb|sum|、\verb|expr|、\verb|equal_test|），
+        保证自上而下的单次计算。
+  \item \textbf{类型推断：}
+        \verb|a| 是 \verb|int|，\verb|b| 是 \verb|float|，
+        算术结果被提升为 \verb|float|；比较表达式始终返回 \verb|bool|。
+  \item \textbf{事件验证：} 运行后执行：
+\begin{verbatim}
+> a = 4
+推送事件: a = 4
+当前输出: sum_out=6.5, expr_out= (4*3+4)-2.5 = 13.5, bool_out=true
+
+> b = 10
+推送事件: b = 10.0
+当前输出: sum_out=14.0, expr_out= (4*3+4)-10 = 6.0, bool_out=true
+\end{verbatim}
+    每次推送只重算受影响节点，\verb|bool_out| 因仅依赖 \verb|a| 不随 \verb|b| 变化，
+    证明触发集正确。
+\end{itemize}
+
+\subsection{控制流与函数：条件、递归与"循环"}
+Ripple 的控制流以表达式为中心：
+\verb|if ... then ... else ... end|、\verb|func|、\verb|let|，
+没有命令式 while，而是用递归或 \verb|fold/pre| 完成累积式循环。
+本节示例源自 \verb|examples/example7_functions.rpl|。
+\begin{verbatim}
+// 条件与函数
+func clamp(x, lo, hi) = if x < lo then lo
+                        else if x > hi then hi else x end end;
+
+func factorial(n) = if n <= 1 then 1 else n * factorial(n - 1) end;
+
+// let 形成局部绑定
+func hypot(x, y) =
+    let sx = x * x in
+    let sy = y * y in
+    sqrt(sx + sy);
+
+// 输入
+source x : int := 5;
+source y : int := 3;
+
+// 调用与递归
+stream x_clamped <- clamp(x, 0, 10);
+stream fact_x    <- factorial(x);
+stream hypot_xy  <- hypot(x, y);
+
+// 通过 pre 实现“事件步迭代计数器”
+stream tick <- pre(tick, 0) + 1 on x;  // 仅 x 更新时自增
+
+sink clamp_out <- x_clamped;
+sink fact_out  <- fact_x;
+sink hypot_out <- hypot_xy;
+sink tick_out  <- tick;
+\end{verbatim}
+\paragraph{行为分析}
+\begin{itemize}
+  \item \textbf{条件分支：}
+        \verb|clamp| 经过双层 \verb|if| 嵌套，
+        命中最先满足的分支后短路求值，
+        与语义规则 \textsc{IfT}/\textsc{IfF} 一致。
+  \item \textbf{递归函数：}
+        \verb|factorial| 在求值时按运行时函数环境递归调用，
+        不影响静态依赖图（函数体视作纯表达式）；
+        递归深度由输入决定，可处理中等规模整数。
+  \item \textbf{let 作用域：}
+        \verb|hypot| 中 \verb|sx|/\verb|sy| 仅在函数体可见，
+        验证局部环境遮蔽规则（参见 \verb|_infer_let_expression|）。
+  \item \textbf{累积式"循环"：}
+        \verb|tick| 使用 \verb|pre| 读取前一事件步的自身值并加一，
+        仅在 \verb|x| 变化时触发，体现事件驱动式循环；
+        初次求值时 \verb|pre| 取初值 0。
+  \item \textbf{事件序列验证：}
+\begin{verbatim}
+初始: x=5 -> clamp_out=5, fact_out=120, hypot_out=5.83, tick_out=1
+> x = 2   => clamp_out=2,  fact_out=2,   tick_out=2  (仅 x 触发 tick)
+> y = 4   => clamp_out=2,  fact_out=2,   tick_out=2  (y 不触发 tick)
+\end{verbatim}
+    说明触发器与递归函数均能在拓扑调度下稳定运行，无重复计算。
+\end{itemize}
+
+\subsection{高级特性：数组、结构体与状态原语}
+\paragraph{数组与高阶操作（map/filter/reduce）}
+代码改编自 \verb|examples/example3_array.rpl|，
+覆盖数组字面量、索引、内置函数与高阶 Lambda。
+\begin{verbatim}
+source x : int := 2;
+stream arr        <- [x, x * 2, x * 3];
+stream doubled    <- map(arr,   (n) => n * 2);
+stream evens      <- filter(arr,(n) => n % 2 == 0);
+stream reduced    <- reduce(arr, 0, (acc, n) => acc + n);
+stream filtered_sum <- reduce(filter(arr, (n) => n > 3),
+                              0, (acc, n) => acc + n);
+
+sink arr_out    <- arr;
+sink doubled_out<- doubled;
+sink evens_out  <- evens;
+sink sum_out    <- reduced;
+sink fsum_out   <- filtered_sum;
+\end{verbatim}
+当 \verb|x=3| 时：
+\begin{verbatim}
+arr = [3, 6, 9]
+doubled = [6, 12, 18]
+evens = [6]
+sum_out = 18
+fsum_out = 15   // 过滤出 >3 的 6 和 9 后再 reduce
+\end{verbatim}
+拓扑调度保证 \verb|arr| 更新一次，\verb|map/filter/reduce| 各自只遍历一次，
+且 \verb|filter| 的中间数组不影响其他节点。
+
+\paragraph{结构体与字段级触发}
+代码来自 \verb|examples/example8_structs.rpl|，
+验证类型别名、字段展开与按字段触发。
+\begin{verbatim}
+type Point = { x: int, y: int };
+source p : Point := { x: 3, y: 4 };
+
+// 字段访问与派生
+stream px <- p.x;
+stream py <- p.y;
+func square(n) = n * n;
+stream distance <- sqrt(square(p.x) + square(p.y));
+
+// 组合新的结构体
+stream doubled <- { x: p.x * 2, y: p.y * 2 };
+
+sink px_out <- px;
+sink py_out <- py;
+sink dist_out <- distance;
+sink doubled_out <- doubled;
+\end{verbatim}
+\paragraph{行为分析}
+\begin{itemize}
+  \item \textbf{类型展开：}
+        编译期将 \verb|Point| 展开，
+        \verb|p.x|/\verb|p.y| 作为独立源节点参与 rank 计算，便于字段级推送。
+  \item \textbf{字段触发：}
+        执行 \verb|engine.push_event("p.x", 6)| 仅使依赖 \verb|p.x| 的节点入队，
+        \verb|py_out| 保持 4，\verb|dist_out| 更新为 $\sqrt{36+16}$。
+  \item \textbf{整体更新：}
+        \verb|engine.push_event("p", {x:0,y:0})| 会批量推送字段节点，
+        所有依赖随之更新，验证虚拟节点到字段节点的展开逻辑。
+\end{itemize}
+
+\paragraph{fold + 结构体累积}
+选自 \verb|test_comprehensive.py| 的第三组测试，证明 fold 可以累积结构体状态。
+\begin{verbatim}
+type Stats = { count: int, sum: int };
+source data : [int] := [1, 2, 3, 4, 5];
+
+stream stats <- fold(data, { count: 0, sum: 0 }, (acc, x) => {
+    count: acc.count + 1,
+    sum:   acc.sum + x
+});
+
+stream count   <- stats.count;
+stream average <- stats.sum / stats.count;
+sink count_out <- count;
+sink avg_out   <- average;
+\end{verbatim}
+初始输出 \verb|count_out=5|、\verb|avg_out=3.0|，推送 \verb|data = [2, 4]| 后，fold 重新累积得到 \verb|count_out=2|、\verb|avg_out=3.0|，说明 fold 的累积状态与数组源变化一致，且结构体字段可直接投影为新流。
+
+\subsection{综合案例：多指标股票信号（复杂逻辑跑通证明）}
+完整代码见 \verb|examples/example6_complex.rpl|。特性覆盖：\verb|fold| 累积、\verb|pre| 历史值、条件分支、字符串比较、多 Sink 仪表板。
+\begin{verbatim}
+source price : float := 100.0;
+stream price_sum   <- fold(price, 0.0, (acc, p) => acc + p);
+stream price_count <- fold(price, 0.0, (acc, p) => acc + 1.0);
+stream sma         <- price_sum / price_count;
+
+stream prev_price      <- pre(price, 100.0);
+stream price_change    <- price - prev_price;
+stream price_change_pct<- if prev_price > 0.0
+                          then (price_change / prev_price) * 100.0
+                          else 0.0 end;
+
+stream trend <- if price > sma then "uptrend"
+                else if price < sma then "downtrend"
+                else "neutral" end end;
+
+stream volatility <- if price_change_pct > 5.0 || price_change_pct < -5.0
+                     then "high"
+                     else if price_change_pct > 2.0 || price_change_pct < -2.0
+                     then "medium" else "low" end end;
+
+stream signal <- if trend == "uptrend" && volatility != "high"
+                 && price_change_pct > 1.0 then "BUY"
+                 else if trend == "downtrend" && volatility != "high"
+                 && price_change_pct < -1.0 then "SELL"
+                 else "HOLD" end end;
+\end{verbatim}
+\paragraph{事件序列与正确性}
+\begin{itemize}
+  \item \textbf{t=0，price=100：} \verb|sma=100|，\verb|trend=neutral|，\verb|volatility=low|，\verb|signal=HOLD|。fold/prev 初值生效。
+  \item \textbf{t=1，price=102：} \verb|price_change_pct=2%|，\verb|trend=uptrend|，\verb|volatility=medium|（2\% 阈值），\verb|signal=BUY|。证明链式条件与字符串比较正确执行。
+  \item \textbf{t=2，price=95：} \verb|price_change_pct \approx -6.86%|，\verb|trend=downtrend|，\verb|volatility=high|，\verb|signal=HOLD|（高波动阻止卖出）。显示多条件防抖策略有效。
+  \item \textbf{单次计算保证：} 每个时间步 \verb|price_change|、\verb|trend|、\verb|signal| 均只计算一次，因 rank 拓扑和触发器确保无故障传播。
+\end{itemize}
+
+\subsection{CSV 数据处理}
+本节展示 Ripple 对 CSV 文件的读取、列提取、过滤与聚合能力。示例代码位于 \verb|examples/example9_csv.rpl|。
+\begin{verbatim}
+// CSV 数据处理示例
+source data := load_csv("examples/test_data.csv", true);
+
+// 基础统计
+stream row_count <- len(data);
+stream salaries <- col(data, 2);           // 提取第3列（薪资）
+stream avg_salary <- avg(salaries);
+stream total_salary <- sum(salaries);
+
+// 过滤：筛选 active=true 的行
+stream active <- filter(data, (row) => row[3]);
+stream active_count <- len(active);
+
+// 转换：提取所有姓名
+stream names <- map(data, (row) => row[0]);
+
+sink rows_out <- row_count;
+sink avg_out <- avg_salary;
+sink total_out <- total_salary;
+sink active_out <- active_count;
+sink names_out <- names;
+\end{verbatim}
+\paragraph{行为分析}
+\begin{itemize}
+  \item \textbf{自动类型推断：} \verb|load_csv| 解析 CSV 时自动将单元格转为 \verb|int|/\verb|float|/\verb|bool|/\verb|string|，无需手动声明。
+  \item \textbf{列提取：} \verb|col(data, 2)| 返回所有行的第 3 列（0 索引），类型为 \verb|[float]|。
+  \item \textbf{聚合函数：} \verb|avg|、\verb|sum| 对数值数组求平均和总和。
+  \item \textbf{热重载：} 修改 CSV 文件后，依赖图自动重新计算，输出实时更新。
+\end{itemize}
+
+\subsection{多 CSV 数据分析}
+本节展示从多个 CSV 数据源构建业务分析仪表板。示例代码位于 \verb|examples/example10_multi_csv.rpl|。
+\begin{verbatim}
+// 多数据源加载
+source employees := load_csv("examples/test_data.csv", true);
+source products := load_csv("examples/products.csv", true);
+source orders := load_csv("examples/orders.csv", true);
+
+// 员工分析
+stream emp_count <- len(employees);
+stream emp_salaries <- col(employees, 2);
+stream avg_salary <- avg(emp_salaries);
+stream total_payroll <- sum(emp_salaries);
+
+// 产品分析
+stream prod_prices <- col(products, 2);
+stream prod_stocks <- col(products, 3);
+stream avg_price <- avg(prod_prices);
+stream total_inventory <- sum(prod_stocks);
+
+// 订单分析
+stream order_quantities <- col(orders, 2);
+stream total_items_sold <- sum(order_quantities);
+
+// 跨数据源计算
+stream estimated_revenue <- total_items_sold * avg_price;
+stream orders_per_employee <- len(orders) / emp_count;
+
+// 仪表板输出
+sink emp_total <- emp_count;
+sink emp_avg_salary <- avg_salary;
+sink prod_avg_price <- avg_price;
+sink biz_revenue <- estimated_revenue;
+\end{verbatim}
+\paragraph{行为分析}
+\begin{itemize}
+  \item \textbf{多源依赖：} 三个 CSV 源独立加载，各自的下游节点形成独立子图。
+  \item \textbf{跨源计算：} \verb|estimated_revenue| 依赖 \verb|orders| 和 \verb|products| 两个源，任一变化都会触发重算。
+  \item \textbf{仪表板模式：} 多个 \verb|sink| 输出形成实时仪表板，每次数据变更后显示最新指标。
+  \item \textbf{并行监听：} 三个 CSV 文件同时被监听，任一文件修改都会触发对应分支的更新传播。
+\end{itemize}
+
+%\paragraph{小结} 以上示例覆盖了 Ripple 的主要语言面向：基础算术与输出、表达式式控制流、函数与递归、fold/pre 状态循环、数组高阶操作、结构体与字段触发、CSV 数据处理与多源分析，以及复杂业务组合。所有代码均可直接运行或由测试脚本验证，证明语言在拓扑调度与类型检查的支撑下可以稳健地跑通复杂逻辑。

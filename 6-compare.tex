@@ -1,0 +1,170 @@
+\section{相关语言对比分析}
+本章站在"响应式/数据流"大类视角，对比 Ripple 与主流语言或工具在
+范式、时间/调度语义、类型安全、故障避免、执行效率、工具链等方面的差异。
+选取的基线既包含学术界的同步数据流语言，
+也涵盖工业界流行的库与低门槛工具，
+以便从多个维度刻画 Ripple 的定位与取舍。
+
+\subsection{对比基线与选择理由}
+\begin{itemize}
+  \item \textbf{RxJS/ReactiveX（JavaScript 库）}：
+        前端最常用的响应式库，代表"库式 FRP"，
+        对比可见 Ripple 的"语言级"优势与语法简洁性差异。
+  \item \textbf{Elm（静态类型前端语言）}：
+        现代 FRP-ish 语言，具备类型系统与信号模型，
+        可对比 Ripple 的运行时调度与可扩展性。
+  \item \textbf{Lustre/Signal（同步数据流语言家族）}：
+        实时/控制系统的黄金标准，强调时间同步与形式化验证，
+        是 Ripple 时间语义的主要灵感来源。
+  \item \textbf{电子表格（Excel/Google Sheets）}：
+        极低门槛的"公式即依赖"范式，
+        可对比 Ripple 的抽象与可验证性。
+  \item \textbf{TypeScript + MobX/Redux Toolkit（状态管理框架）}：
+        工程界常见的状态/数据流组合方案，
+        用于对比样板代码量、可维护性与性能。
+\end{itemize}
+
+\subsection{核心差异比较}
+{\setlength{\tabcolsep}{4pt}\scriptsize
+\begin{tabularx}{\linewidth}{p{1.0cm}p{2.0cm}p{2.2cm}p{1.6cm}p{2.0cm}p{1.6cm}p{2.4cm}}
+\toprule
+\textbf{维度} & \textbf{Ripple} & \textbf{RxJS} & \textbf{Elm} &
+  \textbf{Lustre} & \textbf{电子表格} & \textbf{TS+MobX} \\
+\midrule
+范式与载体
+  & 原生响应式语言，依赖图+表达式；Python实现便于嵌入。
+  & JS库式FRP，Observable链式组合子。
+  & 函数式前端语言，TEA架构。
+  & 同步数据流语言，嵌入式/安全关键。
+  & 单元格=公式的数据流工具。
+  & 命令式语言+状态管理框架。 \\
+时间/调度
+  & 同步事件步，rank+触发器一次求值。
+  & 异步推流，调度器用户选。
+  & 逻辑时间=消息循环，运行时驱动。
+  & 同步时钟，每tick静态调度。
+  & 事件驱动重算，依赖隐式。
+  & 事件循环+观察者，middleware控制异步。 \\
+类型检查
+  & 显式类型+Stream$\langle$T$\rangle$；环/重复/引用检查。
+  & 依赖TS/JS，类型安全取决于使用。
+  & 强类型+推断+穷尽检查，无any。
+  & 强类型，时钟类型系统。
+  & 动态/弱类型，运行时报\#VALUE!。
+  & TS类型；store/selector约束手写。 \\
+状态/历史
+  & pre、fold原语；节点驻留历史/累积。
+  & scan等组合子，无语言级历史。
+  & 状态在Model，历史需手存。
+  & pre/延迟/窗口完备且静态安全。
+  & 手写上一行/辅助格，无fold/pre。
+  & 状态在store，历史自行保存。 \\
+故障一致性
+  & 无环+rank调度防glitch；触发过滤。
+  & 顺序/订阅时机不慎易glitch。
+  & 单向数据流较安全，复杂依赖需拆分。
+  & 因果性检查+拓扑保证无glitch。
+  & 菱形依赖常出旧值，依赖引擎优化。
+  & 依赖selector/memo，受更新顺序影响。 \\
+执行效率
+  & 解释执行；触发器减重算；可迁移高性能后端。
+  & 事件驱动高效但订阅/分配多；回压手管。
+  & 编译JS体积小；不可变带复制成本。
+  & 编译C，硬实时友好，占用低。
+  & 粗粒度重算，大表易慢。
+  & Redux拷贝多，MobX跟踪有开销。 \\
+工具链
+  & AST/DOT可视化；形式语义；测试覆盖核心特性。
+  & Marble测试/浏览器调试，无静态验证。
+  & 友好编译错误；可用Elm Review。
+  & 工业级验证（model checking、抽象解释）。
+  & 原生图表强，无形式化/静态检查。
+  & Redux DevTools时间线；无形式化保证。 \\
+简洁扩展
+  & 语法接近数学式；无需手写订阅；易迁移后端。
+  & 组合子多但链式样板重。
+  & 语法简洁，框架约束强，偏前端。
+  & 专业语法，曲线高，领域窄。
+  & 门槛低，复杂逻辑靠技巧，扩展弱。
+  & 生态大但样板多，跨组件依赖易复杂。 \\
+\bottomrule
+\end{tabularx}}
+\normalsize
+
+\subsection{简洁性与表达力比较}
+\paragraph{语言级 vs. 库级}
+Ripple 将"流 = 变量"的语义下沉到语法和编译器，\verb|<-| 绑定即依赖，
+避免 RxJS/MobX 式的显式订阅、解订阅与生命周期管理；
+与电子表格相比，Ripple 继承了"公式即关系"的直观性，
+但提供显式类型与结构体/函数，使复杂逻辑不依赖"隐藏单元格技巧"。
+Elm 在语法上简洁，但 TEA 消息循环让长链依赖需要样板状态拆分；
+Lustre/Signal 的语法专业化，表意清晰但学习成本高。
+总体上，Ripple 在"学习成本/表达力"比上介于电子表格（低成本）
+与 Lustre（高成本）之间。
+
+\paragraph{控制流与高阶组合}
+Ripple 支持 \verb|if|、\verb|match|（语义中描述）、lambda、高阶数组操作，
+使数据流与普通表达式无缝组合；
+RxJS 的高阶组合子丰富但链式 API 冗长；
+Redux/MobX 需要在 reducer/selector 中手写循环或 map，嵌套性差；
+Lustre/Signal 也有 map/fold，但通常为固定频率流。
+Ripple 的表达式式控制流让"数据流 + 计算"统一在一个语法域内，
+减少上下文切换。
+
+\subsection{执行效率与调度策略比较}
+\paragraph{调度颗粒度}
+Ripple 采用 rank + 触发器的小顶堆，确保每事件步每节点只算一次；
+Lustre/Signal 的静态调度开销更低（编译期展开），适合硬实时；
+RxJS/MobX 以运行时订阅链条为主，
+若依赖关系频繁变化或 selector 未 memo 化，会产生重复计算；
+电子表格重算通常基于增量 DAG，但缺乏字段级触发，粒度更粗。
+Ripple 在 Python 解释层面牺牲部分原始性能，
+但通过字段级触发和状态缓存减少浪费，适合中等规模低延迟场景。
+
+\paragraph{资源与内存}
+Ripple 的节点缓存与累积器驻留内存，与 Redux/MobX 类似；
+Lustre/Signal 编译后占用最小；
+RxJS 频繁分配 Observable/订阅对象，GC 压力相对高。
+Ripple 以 Python GC 为主，无额外手写分配器，
+工程复杂度低但难以达到 C/LLVM 级别性能；
+未来可将"依赖图 + 公式"后端换成 C/LLVM 以缩小差距。
+
+\subsection{一致性、安全与可验证性比较}
+\paragraph{glitch 免疫}
+Ripple 的静态无环 + rank 调度 + 触发过滤保证菱形依赖无 glitch，
+与 Lustre/Signal 的因果性检查同属强保证；
+Elm/Redux 基于单向数据流也较安全，但缺少字段级触发，
+复杂依赖链可能重复计算；
+RxJS/MobX/电子表格在缺乏严格拓扑或因订阅顺序容易出现"旧值被读"现象，
+需要工程约定。Ripple 的优势是"编译期发现 + 运行时策略"二重保险。
+
+\paragraph{类型与形式化}
+Ripple 提供静态类型检查、结构体展开与流类型，与 Elm、Lustre 类似；
+但类型推断弱于 Elm（存在 any 回退），形式化验证工具链尚在起步；
+Lustre/Signal 具备成熟的模型检查与抽象解释工具，遥遥领先。
+电子表格/RxJS/MobX 类型安全依赖宿主语言或运行时断言，
+缺少形式化语义支撑。
+Ripple 的完整语义章节为后续验证提供了基础，比库式方案更易扩展验证器。
+
+\subsection{工具链与生态比较}
+\paragraph{调试与可视化}
+Ripple 自带 AST/DOT 输出与运行时调试接口；
+Redux/MobX 有成熟的时间旅行调试；RxJS 有 marble 测试；
+Elm 有友好的编译错误提示；Lustre/Signal 生态提供工业级验证工具。
+Ripple 目前在 IDE/调试器生态上较弱，
+但由于依赖图结构清晰，可快速对接图可视化或时序分析工具。
+
+\paragraph{可扩展性与迁移成本}
+Ripple 的"图 + 公式"后端接口明确，可向 C/LLVM/并行调度迁移；
+语法保持小而全，便于教学和原型。
+Elm/Redux/MobX 拥有庞大社区与库支持，迁移成本低但框架耦合高；
+Lustre/Signal 针对特定领域，通用性受限。
+对于需要可验证响应式行为且希望低样板的场景
+（教学、原型、IoT/前端逻辑），Ripple 具备独特优势；
+若追求极致性能或工业认证，目前 Lustre/Signal 更成熟。
+
+\paragraph{结论性定位}
+综合来看，Ripple 在"表达简洁性/一致性保证/教学友好"维度有优势，
+在"极致性能/生态工具链"维度弱于工业成熟方案。
+其长表述目标是：以最小语法负担提供接近同步数据流语言的时间与一致性保障，
+并保留向高性能后端迁移的空间。

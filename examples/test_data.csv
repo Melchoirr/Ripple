@@ -1,6 +1,6 @@
 name,age,salary,active
-Alice,30,5000.5,TRUE
-Bob,25,4500,FALSE
-Charlie,35,600,TRUE
-David,10,520.75,TRUE
-Eve,32,5800,FALSE
+Alice,30,5000.50,TRUE
+Bob,25,4500.00,FALSE
+Charlie,35,6000.00,TRUE
+David,28,5200.75,TRUE
+Eve,32,5800.00,FALSE

@@ -1,0 +1,72 @@
+// Example 10: Multi-CSV Business Analytics Dashboard
+// Demonstrates complex data pipeline with multiple CSV sources
+// Run with: python ripple_runner.py examples/example10_multi_csv.rpl
+// Then type 'watch' to enable live file monitoring
+
+// ==================== Data Sources ====================
+source employees := load_csv("examples/test_data.csv", true);
+source products := load_csv("examples/products.csv", true);
+source orders := load_csv("examples/orders.csv", true);
+
+// ==================== Employee Analytics ====================
+stream emp_count <- len(employees);
+stream emp_salaries <- col(employees, 2);
+stream avg_salary <- avg(emp_salaries);
+stream total_payroll <- sum(emp_salaries);
+stream active_employees <- filter(employees, (row) => row[3]);
+stream active_count <- len(active_employees);
+
+// ==================== Product Analytics ====================
+stream prod_count <- len(products);
+stream prod_prices <- col(products, 2);
+stream prod_stocks <- col(products, 3);
+stream avg_price <- avg(prod_prices);
+stream total_inventory <- sum(prod_stocks);
+stream expensive_products <- filter(products, (row) => row[2] > 100.0);
+stream expensive_count <- len(expensive_products);
+
+// ==================== Order Analytics ====================
+stream order_count <- len(orders);
+stream order_quantities <- col(orders, 2);
+stream total_items_sold <- sum(order_quantities);
+stream avg_order_size <- avg(order_quantities);
+
+// Large orders (quantity > 3)
+stream large_orders <- filter(orders, (row) => row[2] > 3);
+stream large_order_count <- len(large_orders);
+
+// ==================== Cross-Data Insights ====================
+// Revenue estimate (simplified: total items * avg price)
+stream estimated_revenue <- total_items_sold * avg_price;
+
+// Efficiency metrics
+stream orders_per_employee <- order_count / emp_count;
+stream payroll_per_order <- total_payroll / order_count;
+
+// ==================== Dashboard Output ====================
+// Employee metrics
+sink emp_total <- emp_count;
+sink emp_active <- active_count;
+sink emp_avg_salary <- avg_salary;
+sink emp_payroll <- total_payroll;
+
+// Product metrics
+sink prod_total <- prod_count;
+sink prod_avg_price <- avg_price;
+sink prod_inventory <- total_inventory;
+sink prod_expensive <- expensive_count;
+
+// Order metrics
+sink ord_total <- order_count;
+sink ord_items <- total_items_sold;
+sink ord_large <- large_order_count;
+
+// Business insights
+sink biz_revenue <- estimated_revenue;
+sink biz_efficiency <- orders_per_employee;
+
+// ==================== Expected Output ====================
+// Employees: 5 total, 3 active, avg salary ~5300
+// Products: 5 total, avg price ~311.99, inventory 575
+// Orders: 7 total, 26 items sold, 3 large orders
+// Revenue estimate: 26 * 311.99 = 8111.74

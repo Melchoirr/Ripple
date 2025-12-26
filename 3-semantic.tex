@@ -1,0 +1,345 @@
+\section{语义设计}
+本章给出 Ripple 的形式语义。
+我们采用"\textbf{静态图语义 + 大步表达式语义 + 小步事件语义}"的分层方式：
+编译阶段把声明映射为拓扑有序的依赖图（\verb|ripple_compiler.py|），
+表达式在节点内部按大步指称式规则求值，
+事件传播由运行时图引擎（\verb|ripple_engine.py|）按照 rank 和触发器进行小步归约。
+整个语义链路确保：同一事件步中每个节点至多计算一次，且观察到的状态一致。
+
+\subsection{域的定义（Domains）}
+
+\paragraph{值域}
+\[
+\mathit{Val} ::= \mathbb{Z} \mid \mathbb{R} \mid \mathbb{B} \mid \mathit{String}
+  \mid [\mathit{Val}] \mid \{\mathit{Field}\to\mathit{Val}\} \mid \bot
+\]
+其中 $\mathbb{B}=\{\texttt{true},\texttt{false}\}$，$\bot$ 表示未初始化值。
+
+\paragraph{环境与存储}
+$\rho: \mathit{Id} \to \mathit{Val}$ 为求值环境，$\sigma: \mathit{Id} \to \mathit{Val}$ 为全局存储。
+
+\paragraph{依赖图}
+编译期将程序归约为依赖图 $G$，每个节点包含：
+\[
+\mathit{Node} = (\mathit{deps}, \mathit{trig}, \mathit{rank}, \mathit{stateful}, e)
+\]
+\begin{itemize}
+  \item $\mathit{deps}$：数据依赖集合
+  \item $\mathit{trig}$：触发依赖集合（默认 $\mathit{trig}=\mathit{deps}$）
+  \item $\mathit{rank}$：拓扑序号，$rank = 1 + \max\{rank(d) \mid d \in deps\}$
+  \item $\mathit{stateful}$：是否包含 \verb|pre|/\verb|fold|
+\end{itemize}
+
+\paragraph{运行时状态}
+每个节点维护：$\mathit{cur}$（当前值）、$\mathit{prev}$（上一时刻值，供 \verb|pre| 使用）、
+$\mathit{dirty}$（本轮是否已更新）。
+
+\subsection{辅助函数}
+\begin{itemize}
+  \item $\textsf{deps}(e)$：提取表达式 $e$ 的静态依赖，对应 \verb|extract_dependencies|
+  \item $\textsf{stateful}(e)$：判断是否包含 \verb|pre|/\verb|fold|
+  \item $\llbracket e \rrbracket_{\rho}$：在环境 $\rho$ 下求值表达式 $e$
+  \item $\mathit{subs}(n)$：节点 $n$ 的下游订阅者集合
+\end{itemize}
+
+\subsection{类型系统与类型推导}
+
+类型推导记作 $\Gamma \vdash e : \tau$，表示在类型环境 $\Gamma$ 下表达式 $e$ 具有类型 $\tau$。
+
+\paragraph{类型定义}
+\[
+\tau ::= \texttt{int} \mid \texttt{float} \mid \texttt{bool} \mid \texttt{string}
+  \mid [\tau] \mid \{\ell_1:\tau_1, \ldots\} \mid \texttt{Stream}<\tau> \mid \tau_1 \to \tau_2
+\]
+
+\paragraph{基础类型规则}
+\begin{align*}
+\Gamma \vdash n : \texttt{int} \quad &\text{（整数字面量）} \\
+\Gamma \vdash r : \texttt{float} \quad &\text{（浮点字面量）} \\
+\Gamma \vdash b : \texttt{bool} \quad &\text{（布尔字面量）} \\
+\Gamma \vdash s : \texttt{string} \quad &\text{（字符串字面量）} \\
+\Gamma \vdash x : \Gamma(x) \quad &\text{（变量查找）}
+\end{align*}
+
+\textbf{示例}：
+\begin{verbatim}
+source count : int := 0;        // int 类型
+source rate : float := 0.05;    // float 类型
+source enabled : bool := true;  // bool 类型
+source name : string := "test"; // string 类型
+\end{verbatim}
+
+\paragraph{运算符类型}
+\begin{align*}
+\frac{\Gamma \vdash e_1 : \tau_1 \quad \Gamma \vdash e_2 : \tau_2 \quad \tau_1, \tau_2 \in \{\texttt{int}, \texttt{float}\}}{\Gamma \vdash e_1 \odot e_2 : \textsf{promote}(\tau_1, \tau_2)} \quad &\text{（算术运算，$\odot \in \{+,-,*,/,\%\}$）} \\[6pt]
+\frac{\Gamma \vdash e_1 : \tau \quad \Gamma \vdash e_2 : \tau}{\Gamma \vdash e_1 \bowtie e_2 : \texttt{bool}} \quad &\text{（比较运算，$\bowtie \in \{==, !=, <, >, \le, \ge\}$）} \\[6pt]
+\frac{\Gamma \vdash e_1 : \texttt{bool} \quad \Gamma \vdash e_2 : \texttt{bool}}{\Gamma \vdash e_1 \land e_2 : \texttt{bool}} \quad &\text{（逻辑运算）}
+\end{align*}
+其中 $\textsf{promote}(\texttt{int}, \texttt{int}) = \texttt{int}$，否则为 $\texttt{float}$。
+
+\textbf{示例}（类型提升）：
+\begin{verbatim}
+source a : int := 10;
+source b : float := 2.5;
+stream sum <- a + b;      // 结果类型为 float（int 提升为 float）
+stream prod <- a * 3;     // 结果类型为 int（int * int = int）
+stream cmp <- a > 5;      // 结果类型为 bool（比较运算）
+stream logic <- cmp and (b < 10.0);  // bool and bool = bool
+\end{verbatim}
+
+\paragraph{复合类型规则}
+\begin{align*}
+\frac{\Gamma \vdash e_i : \tau \quad \forall i \in 1..n}{\Gamma \vdash [e_1, \ldots, e_n] : [\tau]} \quad &\text{（数组字面量）} \\[6pt]
+\frac{\Gamma \vdash e : [\tau] \quad \Gamma \vdash i : \texttt{int}}{\Gamma \vdash e[i] : \tau} \quad &\text{（数组索引）} \\[6pt]
+\frac{\Gamma \vdash e_i : \tau_i \quad \forall i \in 1..n}{\Gamma \vdash \{\ell_1: e_1, \ldots, \ell_n: e_n\} : \{\ell_1:\tau_1, \ldots, \ell_n:\tau_n\}} \quad &\text{（结构体字面量）} \\[6pt]
+\frac{\Gamma \vdash e : \{\ldots, \ell : \tau, \ldots\}}{\Gamma \vdash e.\ell : \tau} \quad &\text{（字段访问）}
+\end{align*}
+
+\textbf{示例}（数组与结构体）：
+\begin{verbatim}
+// 数组：所有元素必须同类型
+source nums : [int] := [1, 2, 3, 4, 5];
+stream first <- nums[0];              // 类型为 int
+stream matrix <- [[1,2], [3,4]];      // 类型为 [[int]]
+
+// 结构体：字段可以是不同类型
+type Point = { x: float, y: float };
+source origin : Point := { x: 0.0, y: 0.0 };
+stream xCoord <- origin.x;            // 类型为 float
+\end{verbatim}
+
+\paragraph{控制流类型}
+\begin{align*}
+\frac{\Gamma \vdash b : \texttt{bool} \quad \Gamma \vdash e_1 : \tau \quad \Gamma \vdash e_2 : \tau}{\Gamma \vdash \texttt{if } b \texttt{ then } e_1 \texttt{ else } e_2 : \tau} \quad &\text{（条件表达式）} \\[6pt]
+\frac{\Gamma \vdash e_1 : \tau_1 \quad \Gamma[x \mapsto \tau_1] \vdash e_2 : \tau_2}{\Gamma \vdash \texttt{let } x = e_1 \texttt{ in } e_2 : \tau_2} \quad &\text{（let 绑定）} \\[6pt]
+\frac{\Gamma[x_1:\tau_1, \ldots, x_n:\tau_n] \vdash e : \tau}{\Gamma \vdash (x_1, \ldots, x_n) \Rightarrow e : (\tau_1, \ldots, \tau_n) \to \tau} \quad &\text{（Lambda 表达式）}
+\end{align*}
+
+\textbf{示例}（控制流）：
+\begin{verbatim}
+source x : int := 10;
+
+// if-then-else：两个分支必须类型一致
+stream abs_x <- if x >= 0 then x else -x end;  // 类型为 int
+
+// let 绑定：局部变量引入
+stream doubled <- let y = x * 2 in y + 1 end;  // 类型为 int
+
+// Lambda 表达式：匿名函数
+stream square <- (n) => n * n;  // 类型为 int -> int
+\end{verbatim}
+
+\paragraph{高阶函数类型}
+\begin{align*}
+\frac{\Gamma \vdash arr : [\tau_1] \quad \Gamma \vdash f : \tau_1 \to \tau_2}{\Gamma \vdash \texttt{map}(arr, f) : [\tau_2]} \\[6pt]
+\frac{\Gamma \vdash arr : [\tau] \quad \Gamma \vdash p : \tau \to \texttt{bool}}{\Gamma \vdash \texttt{filter}(arr, p) : [\tau]} \\[6pt]
+\frac{\Gamma \vdash arr : [\tau_1] \quad \Gamma \vdash init : \tau_2 \quad \Gamma \vdash f : (\tau_2, \tau_1) \to \tau_2}{\Gamma \vdash \texttt{reduce}(arr, init, f) : \tau_2}
+\end{align*}
+
+\textbf{示例}（高阶函数）：
+\begin{verbatim}
+source nums : [int] := [1, 2, 3, 4, 5];
+
+// map: [int] + (int -> float) = [float]
+stream halves <- map(nums, (x) => x / 2.0);
+
+// filter: [int] + (int -> bool) = [int]
+stream evens <- filter(nums, (x) => x % 2 == 0);
+
+// reduce: [int] + string + (string, int) -> string = string
+stream csv <- reduce(nums, "", (acc, x) => acc + "," + x);
+\end{verbatim}
+
+\paragraph{时序操作符类型}
+\begin{align*}
+\frac{\Gamma \vdash x : \tau \quad \Gamma \vdash init : \tau}{\Gamma \vdash \texttt{pre}(x, init) : \tau} \\[6pt]
+\frac{\Gamma \vdash s : \tau_1 \quad \Gamma \vdash init : \tau_2 \quad \Gamma \vdash f : (\tau_2, \tau_1) \to \tau_2}{\Gamma \vdash \texttt{fold}(s, init, f) : \tau_2}
+\end{align*}
+
+\textbf{示例}（时序操作符）：
+\begin{verbatim}
+source value : int := 0;
+
+// pre: 返回上一时刻的值，初始值类型必须与流类型一致
+stream prev_value <- pre(value, -1);  // 类型为 int
+
+// fold: 累积状态，结果类型由初始值和累积函数决定
+stream total <- fold(value, 0, (acc, v) => acc + v);  // 类型为 int
+
+// fold 也可用于类型转换
+stream history <- fold(value, "", (s, v) => s + " " + v);  // 类型为 string
+\end{verbatim}
+
+\paragraph{声明类型检查}
+\begin{itemize}
+  \item \verb|source x : τ := e|：检查 $\vdash e : \tau'$ 且 $\tau' \le \tau$（子类型兼容）。
+  \item \verb|stream x <- e|：推导 $\vdash e : \tau$，将 $x : \texttt{Stream}<\tau>$ 加入环境。
+  \item \verb|func f(x₁,...,xₙ) = e|：在 $\Gamma[x_i : \texttt{any}]$ 下推导 $e$ 类型，记录函数签名。
+\end{itemize}
+
+\textbf{示例}（声明与类型检查）：
+\begin{verbatim}
+// source: 显式类型注解，初始值必须兼容
+source counter : int := 0;           // 正确：0 是 int
+source ratio : float := 1;           // 正确：int 可提升为 float
+// source bad : int := "hello";      // 错误：string 不兼容 int
+
+// stream: 类型自动推导
+stream doubled <- counter * 2;       // 推导为 Stream<int>
+stream mixed <- counter + ratio;     // 推导为 Stream<float>
+
+// func: 参数类型在调用时确定
+func double(x) = x * 2;
+stream result <- double(counter);    // 此处 x 被推断为 int
+\end{verbatim}
+
+\subsection{静态语义：从声明到依赖图}
+
+编译阶段将各类声明转换为依赖图节点：
+
+\paragraph{源节点} \verb|source x := e| 编译为：
+\[
+G[x] = (\varnothing, \varnothing, 0, \bot, e)
+\]
+源节点无依赖，$rank=0$，初始值为 $\llbracket e \rrbracket$。
+
+\paragraph{流节点} \verb|stream x <- e| 编译为：
+\[
+G[x] = (\textsf{deps}(e), \textsf{deps}(e), 1+\max_{d}\{rank(d)\}, \textsf{stateful}(e), e)
+\]
+
+\paragraph{输出节点} \verb|sink x <- e| 与流节点类似，但不向下游传播。
+
+\paragraph{函数定义} \verb|func f(x) = e| 存入函数环境 $\mathcal{F}[f \mapsto (x, e)]$，供求值时调用。
+
+\subsection{表达式大步语义}
+
+表达式求值记作 $\llbracket e \rrbracket_{\rho} = v$，主要规则如下：
+
+\paragraph{基本表达式}
+\begin{align*}
+\llbracket c \rrbracket &= c & \text{（字面量）} \\
+\llbracket x \rrbracket_{\rho} &= \rho(x) & \text{（变量）} \\
+\llbracket e_1 \odot e_2 \rrbracket &= \llbracket e_1 \rrbracket \odot \llbracket e_2 \rrbracket & \text{（二元运算）}
+\end{align*}
+
+\paragraph{条件与函数}
+\begin{align*}
+\llbracket \texttt{if } b \texttt{ then } e_1 \texttt{ else } e_2 \rrbracket &=
+\begin{cases}
+\llbracket e_1 \rrbracket & b = \texttt{true} \\
+\llbracket e_2 \rrbracket & b = \texttt{false}
+\end{cases} \\
+\llbracket (x) \Rightarrow e \rrbracket_{\rho} &= \langle x, e, \rho \rangle \quad\text{（闭包）} \\
+\llbracket f(a_1, \ldots, a_n) \rrbracket_{\rho} &= \llbracket e_f \rrbracket_{\rho[x_1 \mapsto v_1, \ldots, x_n \mapsto v_n]}
+\end{align*}
+其中 $\mathcal{F}[f] = (x_1, \ldots, x_n, e_f)$，$v_i = \llbracket a_i \rrbracket_{\rho}$。
+
+\paragraph{递归函数}
+递归函数调用通过环境中的函数绑定实现。设 $\mathcal{F}$ 为全局函数环境：
+\[
+\llbracket f(a_1, \ldots, a_n) \rrbracket_{\rho, \mathcal{F}} = \llbracket e_f \rrbracket_{\rho', \mathcal{F}}
+\]
+其中 $\rho' = \rho[x_1 \mapsto \llbracket a_1 \rrbracket, \ldots, x_n \mapsto \llbracket a_n \rrbracket]$。
+递归调用时，函数体 $e_f$ 可再次引用 $f$，因 $\mathcal{F}$ 始终可见。
+
+\textbf{示例}（阶乘）：
+\begin{verbatim}
+func factorial(n) = if n <= 1 then 1 else n * factorial(n - 1) end;
+\end{verbatim}
+求值 $\llbracket \texttt{factorial}(3) \rrbracket$ 展开为：
+\[
+3 \times \llbracket \texttt{factorial}(2) \rrbracket = 3 \times 2 \times \llbracket \texttt{factorial}(1) \rrbracket = 3 \times 2 \times 1 = 6
+\]
+
+\paragraph{时序操作符}
+\begin{align*}
+\llbracket \texttt{pre}(x, init) \rrbracket &=
+\begin{cases}
+\mathit{prev}(x) & \mathit{prev}(x) \neq \bot \\
+\llbracket init \rrbracket & \text{否则}
+\end{cases} \\
+\llbracket \texttt{fold}(s, init, (a,x) \Rightarrow e) \rrbracket &= \llbracket e \rrbracket_{[a \mapsto state, x \mapsto \llbracket s \rrbracket]}
+\end{align*}
+其中 $state$ 为累积状态（首次为 $init$）。
+
+\paragraph{数组操作}
+
+\subparagraph{数组字面量与索引}
+\begin{align*}
+\llbracket [e_1, \ldots, e_n] \rrbracket_{\rho} &= [\llbracket e_1 \rrbracket_{\rho}, \ldots, \llbracket e_n \rrbracket_{\rho}] \\
+\llbracket arr[i] \rrbracket_{\rho} &= \llbracket arr \rrbracket_{\rho}[\llbracket i \rrbracket_{\rho}] \quad\text{（0-索引）}
+\end{align*}
+
+\subparagraph{高阶数组函数}
+\begin{align*}
+\llbracket \texttt{map}(arr, f) \rrbracket &= [\llbracket f \rrbracket(v) \mid v \in \llbracket arr \rrbracket] \\
+\llbracket \texttt{filter}(arr, p) \rrbracket &= [v \mid v \in \llbracket arr \rrbracket, \llbracket p \rrbracket(v) = \texttt{true}] \\
+\llbracket \texttt{reduce}(arr, init, f) \rrbracket &= \textsf{foldl}(\llbracket f \rrbracket, \llbracket init \rrbracket, \llbracket arr \rrbracket)
+\end{align*}
+其中 $\textsf{foldl}(f, z, []) = z$，$\textsf{foldl}(f, z, x::xs) = \textsf{foldl}(f, f(z, x), xs)$。
+
+\subparagraph{内置数组函数}
+\begin{align*}
+\llbracket \texttt{len}(arr) \rrbracket &= |arr| \\
+\llbracket \texttt{head}(arr) \rrbracket &= arr[0] \quad\text{（首元素）} \\
+\llbracket \texttt{tail}(arr) \rrbracket &= [arr[1], \ldots, arr[n-1]] \quad\text{（除首元素）} \\
+\llbracket \texttt{last}(arr) \rrbracket &= arr[n-1] \quad\text{（末元素）} \\
+\llbracket \texttt{sum}(arr) \rrbracket &= \sum_{v \in arr} v \\
+\llbracket \texttt{reverse}(arr) \rrbracket &= [arr[n-1], \ldots, arr[0]] \\
+\llbracket \texttt{transpose}(M) \rrbracket &= M^T \quad\text{（矩阵转置，$M^T_{ij} = M_{ji}$）}
+\end{align*}
+
+\subparagraph{聚合函数}
+\begin{align*}
+\llbracket \texttt{avg}(arr) \rrbracket &= \frac{\sum_{v \in arr} v}{|arr|} \quad\text{（平均值）} \\
+\llbracket \texttt{min}(arr) \rrbracket &= \min_{v \in arr} v \quad\text{（最小值）} \\
+\llbracket \texttt{max}(arr) \rrbracket &= \max_{v \in arr} v \quad\text{（最大值）} \\
+\llbracket \texttt{count}(arr) \rrbracket &= |arr| \quad\text{（等价于 len）} \\
+\llbracket \texttt{count\_if}(arr, p) \rrbracket &= |\{v \in arr \mid \llbracket p \rrbracket(v) = \texttt{true}\}| \quad\text{（条件计数）}
+\end{align*}
+
+\subparagraph{CSV 函数}
+\begin{align*}
+\llbracket \texttt{load\_csv}(path, skip) \rrbracket &= \text{解析 CSV 文件为二维数组，$skip=\texttt{true}$ 时跳过首行} \\
+\llbracket \texttt{col}(data, i) \rrbracket &= [row[i] \mid row \in data] \quad\text{（提取第 $i$ 列）} \\
+\llbracket \texttt{row}(data, i) \rrbracket &= data[i] \quad\text{（提取第 $i$ 行）} \\
+\llbracket \texttt{csv\_header}(path) \rrbracket &= \text{返回 CSV 首行作为字符串数组}
+\end{align*}
+CSV 函数在编译期求值并缓存，运行时通过文件监听实现热重载。
+
+\subsection{运行时小步语义：事件传播}
+
+事件传播在图引擎中按 rank 递增顺序进行，使用优先队列 $Q$ 调度。
+
+\paragraph{传播算法}
+\begin{enumerate}
+  \item 源节点收到新值 $v$：更新 $\sigma[x] = v$，将下游 $\mathit{subs}(x)$ 加入队列
+  \item 取出 $Q$ 中 rank 最小的节点 $n$
+  \item 若触发条件满足，重新计算：$v = \llbracket G(n).e \rrbracket$
+  \item 更新状态：$\mathit{cur}(n) = v$，$\mathit{prev}(n) = \mathit{cur}_{old}(n)$
+  \item 将 $\mathit{subs}(n)$ 加入队列，重复直到 $Q$ 为空
+\end{enumerate}
+
+\paragraph{终止性保证}
+由于图无环（编译期检查）且 rank 严格递增，传播必在有限步内终止，每个节点每轮最多计算一次。
+
+\subsection{语义特性与保证}
+\begin{itemize}
+  \item \textbf{确定性：}
+        大步求值与调度顺序均由 rank 全序决定，
+        且每个节点在每个时间步最多被计算一次，故同一输入事件的输出唯一。
+  \item \textbf{故障免疫：}
+        无环性与触发器约束保证不会出现中间态被下游读取的"glitch"；
+        \verb|pre| 使用 $\mathit{prev}$，\verb|fold| 使用累积状态，
+        避免回读未完成的值。
+  \item \textbf{时间推进：}
+        每次事件结束后 $\Sigma(n).\mathit{prev}$ 设为 $\Sigma(n).\mathit{cur}$，
+        为下一时刻的 \verb|pre| 准备历史值。
+  \item \textbf{可扩展性：}
+        若加入新的控制流（如 \verb|match|）或效应，可在大步语义中增加对应规则；
+        若引入并行调度，只需保持 rank 约束与触发条件即可保证结果与顺序执行等价。
+\end{itemize}
+
+%\paragraph{小结} 以上语义把“语法 $\rightarrow$ 拓扑 $\rightarrow$ 事件执行”三层清晰分离，又通过 $\textsf{deps}$、rank、stateful 标记将它们联结起来，形式化刻画了 Ripple 的零故障传播与有状态流演化过程。
+

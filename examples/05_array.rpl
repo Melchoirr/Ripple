@@ -1,0 +1,40 @@
+// 示例 05：数组操作
+// 功能：数组函数 + 高阶函数（map/filter/reduce）+ Lambda
+// 输入：x=3
+// 输出：arr=[3,6,9], doubled=[6,12,18], total=18
+
+source x : int := 3;
+
+// 数组字面量
+stream arr <- [x, x * 2, x * 3];
+
+// 基础数组函数
+stream length <- len(arr);          // 3
+stream first <- head(arr);          // 3
+stream rest <- tail(arr);           // [6, 9]
+stream end_val <- last(arr);        // 9
+stream rev <- reverse(arr);         // [9, 6, 3]
+
+// 高阶函数 + Lambda 表达式
+stream doubled <- map(arr, (n) => n * 2);
+stream evens <- filter(arr, (n) => n % 2 == 0);
+stream total <- reduce(arr, 0, (acc, n) => acc + n);
+
+// 组合使用：过滤后求和
+stream filtered_sum <- reduce(
+    filter(arr, (n) => n > 3),
+    0,
+    (acc, n) => acc + n
+);
+
+sink arr_out <- arr;
+sink len_out <- length;
+sink last_out <- end_val;
+sink rev_out <- rev;
+sink doubled_out <- doubled;
+sink evens_out <- evens;
+sink total_out <- total;
+
+// 测试：
+// x=3: arr=[3,6,9], doubled=[6,12,18], evens=[6], total=18
+// x=4: arr=[4,8,12], doubled=[8,16,24], evens=[4,8,12], total=24

@@ -1,0 +1,27 @@
+// 示例 01：基础语法
+// 功能：source/stream/sink 声明 + 基本类型 + 算术运算
+// 输入：a=5, b=2.5
+// 输出：sum=7.5, prod=12.5, flag=true
+
+source a : int := 5;
+source b : float := 2.5;
+
+// 算术运算（int + float 自动提升为 float）
+stream sum <- a + b;
+stream diff <- a - b;
+stream prod <- a * b;
+stream div <- a / b;
+stream mod <- a % 2;
+
+// 比较运算（返回 bool）
+stream flag <- a > 3;
+stream equal <- a == 5;
+
+// 逻辑运算
+stream logic <- flag && (b < 5.0);
+stream or_logic <- flag || (a < 0);
+
+sink sum_out <- sum;
+sink prod_out <- prod;
+sink flag_out <- flag;
+sink logic_out <- logic;

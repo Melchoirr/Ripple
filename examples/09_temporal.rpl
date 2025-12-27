@@ -1,0 +1,56 @@
+// 示例 09：时序操作
+// 功能：pre（上一值）+ fold（状态累积）+ on（触发器）
+// 输入：value 序列 1,2,3,4,5
+// 输出：sum=15, count=5, max=5
+
+source value : int := 0;
+source tick : int := 0;
+
+// pre：获取上一时刻的值
+stream prev_value <- pre(value, 0);
+stream delta <- value - prev_value;
+
+// fold：状态累积（求和）
+stream sum <- fold(value, 0, (acc, v) => acc + v);
+
+// fold：计数
+stream count <- fold(value, 0, (acc, v) => acc + 1);
+
+// fold：求平均
+stream average <-
+    if count > 0 then sum / count else 0 end;
+
+// fold：求最大值
+stream max_val <- fold(value, 0, (acc, v) =>
+    if v > acc then v else acc end
+);
+
+// fold：求最小值（初始值设为极大）
+stream min_val <- fold(value, 999999, (acc, v) =>
+    if v < acc then v else acc end
+);
+
+// 带触发器的计数器：仅当 tick 变化时递增
+stream counter <- pre(counter, 0) + 1 on tick;
+
+// 偶数计数：仅当 value 是偶数时递增
+stream even_count <-
+    if value % 2 == 0
+        then pre(even_count, 0) + 1
+        else pre(even_count, 0)
+    end on value;
+
+sink prev_out <- prev_value;
+sink delta_out <- delta;
+sink sum_out <- sum;
+sink count_out <- count;
+sink avg_out <- average;
+sink max_out <- max_val;
+sink counter_out <- counter;
+
+// 测试：
+// 推送 value=1: sum=1, count=1, max=1
+// 推送 value=3: sum=4, count=2, max=3, prev=1, delta=2
+// 推送 value=5: sum=9, count=3, max=5
+// 推送 tick=1: counter=1
+// 推送 tick=2: counter=2

@@ -1,0 +1,50 @@
+// 示例 10：CSV 数据处理
+// 功能：load_csv + col + row + csv_header + 聚合分析
+// 数据：employees.csv（name,age,salary,active）
+// 输出：行数、平均薪资、活跃人数
+
+source data := load_csv("examples/employees.csv", true);
+
+// 基础统计
+stream row_count <- len(data);
+
+// 列提取
+stream names <- col(data, 0);
+stream ages <- col(data, 1);
+stream salaries <- col(data, 2);
+
+// 行提取
+stream first_row <- row(data, 0);
+stream last_row <- row(data, len(data) - 1);
+
+// 聚合分析
+stream avg_salary <- avg(salaries);
+stream total_salary <- sum(salaries);
+stream min_salary <- min(salaries);
+stream max_salary <- max(salaries);
+stream avg_age <- avg(ages);
+
+// 条件统计
+stream active <- filter(data, (r) => r[3]);
+stream active_count <- len(active);
+stream inactive_count <- row_count - active_count;
+
+// 高薪统计
+stream high_salary <- filter(salaries, (s) => s > 7000);
+stream high_salary_count <- len(high_salary);
+
+// 活跃员工的平均薪资
+stream active_salaries <- map(active, (r) => r[2]);
+stream active_avg_salary <- avg(active_salaries);
+
+sink rows_out <- row_count;
+sink names_out <- names;
+sink avg_salary_out <- avg_salary;
+sink total_out <- total_salary;
+sink active_out <- active_count;
+sink high_out <- high_salary_count;
+
+// 测试：
+// employees.csv 有 5 行数据
+// 输出：rows=5, avg_salary=8000, active=3
+// 修改 CSV 文件后自动热重载更新

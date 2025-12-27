@@ -1,0 +1,53 @@
+// 示例 04：函数定义
+// 功能：普通函数 + 递归函数 + let 局部绑定
+// 输入：n=5, x=3, y=4
+// 输出：factorial=120, fibonacci=5, distance=5.0
+
+// 普通函数
+func square(x) = x * x;
+func max2(a, b) = if a > b then a else b end;
+func min2(a, b) = if a < b then a else b end;
+
+// 递归函数：阶乘
+func factorial(n) =
+    if n <= 1 then 1
+    else n * factorial(n - 1)
+    end;
+
+// 递归函数：斐波那契
+func fibonacci(n) =
+    if n <= 1 then n
+    else fibonacci(n - 1) + fibonacci(n - 2)
+    end;
+
+// let 局部绑定（无需 end）
+func distance(x1, y1, x2, y2) =
+    let dx = x2 - x1 in
+    let dy = y2 - y1 in
+    sqrt(dx * dx + dy * dy);
+
+// 组合函数
+func clamp(val, lo, hi) =
+    if val < lo then lo
+    else if val > hi then hi
+    else val
+    end end;
+
+source n : int := 5;
+source x : int := 3;
+source y : int := 4;
+
+stream fact_n <- factorial(n);
+stream fib_n <- fibonacci(n);
+stream sq_x <- square(x);
+stream dist <- distance(0, 0, x, y);
+stream clamped <- clamp(x * 10, 0, 25);
+
+sink fact_out <- fact_n;
+sink fib_out <- fib_n;
+sink dist_out <- dist;
+sink clamp_out <- clamped;
+
+// 测试：
+// n=5: factorial=120, fibonacci=5
+// x=3, y=4: distance=5.0, clamped=25

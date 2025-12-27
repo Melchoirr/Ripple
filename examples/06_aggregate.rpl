@@ -1,0 +1,42 @@
+// 示例 06：聚合函数与数学运算
+// 功能：sum/avg/min/max/count/count_if + abs/sqrt
+// 输入：data=[1,4,9,16,25]
+// 输出：sum=55, avg=11.0, min=1, max=25
+
+source data : [int] := [1, 4, 9, 16, 25];
+
+// 聚合函数
+stream total <- sum(data);
+stream average <- avg(data);
+stream minimum <- min(data);
+stream maximum <- max(data);
+stream cnt <- count(data);
+stream cnt_gt10 <- count_if(data, (x) => x > 10);
+
+// 数学函数
+stream roots <- map(data, (x) => sqrt(x));
+
+// abs 绝对值
+source val : int := -5;
+stream abs_val <- abs(val);
+
+// 综合计算：标准差
+stream variance <- reduce(data, 0.0, (acc, x) =>
+    acc + (x - average) * (x - average)
+) / cnt;
+stream std_dev <- sqrt(variance);
+
+sink sum_out <- total;
+sink avg_out <- average;
+sink min_out <- minimum;
+sink max_out <- maximum;
+sink cnt_out <- cnt;
+sink cnt_gt10_out <- cnt_gt10;
+sink roots_out <- roots;
+sink abs_out <- abs_val;
+sink std_out <- std_dev;
+
+// 测试：
+// data=[1,4,9,16,25]: sum=55, avg=11.0, min=1, max=25
+// count=5, count_if(>10)=2
+// roots=[1.0,2.0,3.0,4.0,5.0]

@@ -1,0 +1,49 @@
+// 示例 07：多维数组与矩阵
+// 功能：二维数组 + transpose + 索引访问
+// 输入：3x3 矩阵
+// 输出：转置矩阵、行/列提取、对角线和
+
+source matrix : [[int]] := [
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 8, 9]
+];
+
+// 矩阵转置
+stream transposed <- transpose(matrix);
+
+// 行访问（一维数组）
+stream row0 <- matrix[0];
+stream row1 <- matrix[1];
+stream row2 <- matrix[2];
+
+// 元素访问
+stream elem_00 <- matrix[0][0];
+stream elem_11 <- matrix[1][1];
+stream elem_12 <- matrix[1][2];
+
+// 转置后访问（原列变行）
+stream col0 <- transposed[0];
+stream col1 <- transposed[1];
+
+// 计算对角线和
+stream diag_sum <- matrix[0][0] + matrix[1][1] + matrix[2][2];
+
+// 计算每行的和
+stream row_sums <- map(matrix, (row) => reduce(row, 0, (a, x) => a + x));
+
+// 计算总和
+stream total <- reduce(row_sums, 0, (a, x) => a + x);
+
+sink matrix_out <- matrix;
+sink transposed_out <- transposed;
+sink row0_out <- row0;
+sink col0_out <- col0;
+sink diag_out <- diag_sum;
+sink total_out <- total;
+
+// 测试：
+// matrix: [[1,2,3],[4,5,6],[7,8,9]]
+// transposed: [[1,4,7],[2,5,8],[3,6,9]]
+// row0=[1,2,3], col0=[1,4,7]
+// diag_sum=15, total=45

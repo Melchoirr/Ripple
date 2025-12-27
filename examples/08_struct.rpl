@@ -1,0 +1,42 @@
+// 示例 08：结构体
+// 功能：type 定义 + 字段访问 + 字段级触发
+// 输入：p={x:3, y:4}
+// 输出：distance=5.0
+
+// 类型定义
+type Point = { x: int, y: int };
+type Rectangle = { width: int, height: int };
+
+source p : Point := { x: 3, y: 4 };
+source rect : Rectangle := { width: 10, height: 5 };
+
+// 字段访问
+stream px <- p.x;
+stream py <- p.y;
+
+// 使用字段计算
+func square(n) = n * n;
+stream distance <- sqrt(square(p.x) + square(p.y));
+
+// 结构体的计算
+stream area <- rect.width * rect.height;
+stream perimeter <- 2 * (rect.width + rect.height);
+
+// 创建新结构体
+stream doubled <- { x: p.x * 2, y: p.y * 2 };
+stream scaled_rect <- { width: rect.width * 2, height: rect.height * 2 };
+
+// 字段级触发：仅当 p.x 变化时重算
+stream px_triggered <- p.x on p.x;
+
+sink px_out <- px;
+sink py_out <- py;
+sink dist_out <- distance;
+sink doubled_out <- doubled;
+sink area_out <- area;
+sink perimeter_out <- perimeter;
+
+// 测试：
+// p={x:3,y:4}: px=3, py=4, distance=5.0
+// 推送 p.x=6: 只有 px, distance 更新，py 不变
+// rect={width:10,height:5}: area=50, perimeter=30

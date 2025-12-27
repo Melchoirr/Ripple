@@ -1,0 +1,33 @@
+// 示例 03：条件表达式
+// 功能：if-then-else 多层嵌套
+// 输入：score=85
+// 输出：grade="B", pass=true
+
+source score : int := 85;
+
+// 多层条件嵌套
+stream grade <-
+    if score >= 90 then "A"
+    else if score >= 80 then "B"
+    else if score >= 70 then "C"
+    else if score >= 60 then "D"
+    else "F"
+    end end end end;
+
+// 简单条件
+stream pass <- if score >= 60 then true else false end;
+
+// 条件表达式可用于任意类型
+stream bonus <-
+    if grade == "A" then 1000
+    else if grade == "B" then 500
+    else 0
+    end end;
+
+sink grade_out <- grade;
+sink pass_out <- pass;
+sink bonus_out <- bonus;
+
+// 测试：
+// score=85: grade="B", pass=true, bonus=500
+// score=55: grade="F", pass=false, bonus=0

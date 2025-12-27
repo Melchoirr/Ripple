@@ -40,6 +40,10 @@ class TypeChecker:
         self.user_functions: Dict[str, FuncDecl] = {}
         # 收集的类型错误
         self.errors: List[TypeError] = []
+        # 正在推断的函数集合（用于检测递归）
+        self._inferring_functions: Set[str] = set()
+        # 函数返回类型缓存
+        self._function_return_types: Dict[str, TypeNode] = {}
 
         # 内置函数类型签名
         self.builtin_functions: Dict[str, Tuple[List[str], str]] = {
@@ -68,6 +72,8 @@ class TypeChecker:
         self.type_env = {}
         self.type_aliases = {}
         self.user_functions = {}
+        self._inferring_functions = set()
+        self._function_return_types = {}
 
         # 第一遍：收集类型别名和函数定义
         for stmt in program.statements:
@@ -319,16 +325,39 @@ class TypeChecker:
         """推断用户函数调用类型"""
         func_decl = self.user_functions[call.name]
 
-        # 构建函数体的局部环境
-        func_env = {}
-        for i, param in enumerate(func_decl.parameters):
-            if i < len(call.arguments):
-                func_env[param] = self.infer_expression(call.arguments[i], local_env)
-            else:
-                func_env[param] = BasicType('any')
+        # 检查是否已缓存返回类型
+        if call.name in self._function_return_types:
+            return self._function_return_types[call.name]
 
-        # 推断函数体类型
-        return self.infer_expression(func_decl.body, func_env)
+        # 检测递归调用：如果正在推断该函数，返回 int（递归函数通常返回数值）
+        if call.name in self._inferring_functions:
+            # 对于递归函数，尝试从 then 分支推断类型
+            if isinstance(func_decl.body, IfExpression):
+                return self.infer_expression(func_decl.body.then_branch, local_env)
+            return BasicType('int')
+
+        # 标记正在推断该函数
+        self._inferring_functions.add(call.name)
+
+        try:
+            # 构建函数体的局部环境
+            func_env = {}
+            for i, param in enumerate(func_decl.parameters):
+                if i < len(call.arguments):
+                    func_env[param] = self.infer_expression(call.arguments[i], local_env)
+                else:
+                    func_env[param] = BasicType('any')
+
+            # 推断函数体类型
+            result_type = self.infer_expression(func_decl.body, func_env)
+
+            # 缓存结果
+            self._function_return_types[call.name] = result_type
+
+            return result_type
+        finally:
+            # 移除标记
+            self._inferring_functions.discard(call.name)
 
     def _infer_if_expression(self, expr: IfExpression, local_env: Dict[str, TypeNode]) -> TypeNode:
         """推断 if 表达式类型"""

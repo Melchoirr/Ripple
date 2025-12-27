@@ -1,0 +1,6 @@
+name,age,salary,active
+张三,30,8000.0,true
+李四,25,6500.0,true
+王五,35,9500.0,false
+赵六,28,7200.0,true
+钱七,32,8800.0,false

@@ -1,0 +1,341 @@
+// ============================================================
+// 示例 11：学生成绩管理系统（综合示例）
+// 功能：展示 Ripple 语言的所有特性
+// 数据：students.csv（6名学生，5门科目成绩）
+// ============================================================
+
+// ==================== 第一部分：类型定义 ====================
+// 展示：type 结构体定义
+
+type Student = {
+    id: int,
+    name: string,
+    total: int,
+    average: float
+};
+
+type SubjectStats = {
+    name: string,
+    avg: float,
+    max: int,
+    min: int
+};
+
+// ==================== 第二部分：函数定义 ====================
+// 展示：普通函数、递归函数、let 局部绑定
+
+// 普通函数：成绩等级判定
+func get_grade(score) =
+    if score >= 90 then "A"
+    else if score >= 80 then "B"
+    else if score >= 70 then "C"
+    else if score >= 60 then "D"
+    else "F"
+    end end end end;
+
+// 普通函数：判断是否及格
+func is_pass(score) = score >= 60;
+
+// 普通函数：计算两数最大值
+func max2(a, b) = if a > b then a else b end;
+
+// 递归函数：阶乘
+func factorial(n) =
+    if n <= 1 then 1
+    else n * factorial(n - 1)
+    end;
+
+// 递归函数：斐波那契数列
+func fibonacci(n) =
+    if n <= 1 then n
+    else fibonacci(n - 1) + fibonacci(n - 2)
+    end;
+
+// let 局部绑定：计算标准差
+func calc_std(scores, m) =
+    let variance = reduce(scores, 0.0, (acc, s) => acc + (s - m) * (s - m)) / len(scores) in
+    sqrt(variance);
+
+// let 局部绑定：计算两点距离（演示多层 let）
+func distance(x1, y1, x2, y2) =
+    let dx = x2 - x1 in
+    let dy = y2 - y1 in
+    sqrt(dx * dx + dy * dy);
+
+// ==================== 第三部分：CSV 数据加载 ====================
+// 展示：load_csv、col、row
+
+source data := load_csv("examples/students.csv", true);
+
+// 提取各列数据
+stream names <- col(data, 1);
+stream chinese_scores <- col(data, 2);
+stream math_scores <- col(data, 3);
+stream english_scores <- col(data, 4);
+stream physics_scores <- col(data, 5);
+stream chemistry_scores <- col(data, 6);
+
+// 行操作
+stream first_student <- row(data, 0);
+stream student_count <- len(data);
+
+// ==================== 第四部分：数组操作 ====================
+// 展示：len、head、tail、last、reverse、map、filter、reduce、Lambda
+
+// 基础数组函数
+stream first_name <- head(names);
+stream last_name <- last(names);
+stream names_reversed <- reverse(names);
+stream rest_names <- tail(names);
+stream name_count <- len(names);
+
+// map：计算每个学生的总分
+stream totals <- map(data, (r) => r[2] + r[3] + r[4] + r[5] + r[6]);
+
+// map：计算每个学生的平均分
+stream averages <- map(totals, (t) => t / 5);
+
+// filter：筛选优秀学生（总分 > 420）
+stream excellent_students <- filter(data, (r) =>
+    r[2] + r[3] + r[4] + r[5] + r[6] > 420
+);
+stream excellent_count <- len(excellent_students);
+
+// filter：筛选需要帮助的学生（数学 < 70）
+stream need_help <- filter(data, (r) => r[3] < 70);
+stream need_help_count <- len(need_help);
+
+// reduce：计算班级总分
+stream class_total <- reduce(totals, 0, (acc, t) => acc + t);
+
+// reduce：计算班级平均分
+stream class_avg <- class_total / student_count;
+
+// ==================== 第五部分：聚合函数 ====================
+// 展示：sum、avg、min、max、count、count_if
+
+// 数学成绩统计
+stream math_sum <- sum(math_scores);
+stream math_avg <- avg(math_scores);
+stream math_max <- max(math_scores);
+stream math_min <- min(math_scores);
+
+// 语文成绩统计
+stream chinese_avg <- avg(chinese_scores);
+stream chinese_max <- max(chinese_scores);
+
+// 英语成绩统计
+stream english_avg <- avg(english_scores);
+
+// 条件统计（使用 filter + len 代替 count_if）
+stream math_passing <- filter(math_scores, (s) => s >= 60);
+stream math_pass_count <- len(math_passing);
+stream math_excellent <- filter(math_scores, (s) => s >= 90);
+stream math_excellent_count <- len(math_excellent);
+stream math_failing <- filter(math_scores, (s) => s < 60);
+stream math_fail_count <- len(math_failing);
+stream total_scores_count <- len(math_scores);
+
+// 多科目统计
+stream all_passing <- filter(totals, (t) => t >= 300);
+stream all_pass_count <- len(all_passing);
+
+// ==================== 第六部分：数学函数 ====================
+// 展示：sqrt、abs
+
+// 标准差计算（直接在流中计算，避免 lambda 作用域限制）
+stream math_variance <- reduce(math_scores, 0.0, (acc, s) => acc + s * s) / student_count - math_avg * math_avg;
+stream math_std <- sqrt(abs(math_variance));
+
+stream chinese_variance <- reduce(chinese_scores, 0.0, (acc, s) => acc + s * s) / student_count - chinese_avg * chinese_avg;
+stream chinese_std <- sqrt(abs(chinese_variance));
+
+// 绝对值：第一个学生与平均分的差距
+stream first_diff <- abs(head(math_scores) - math_avg);
+
+// 平方根演示
+stream sqrt_100 <- sqrt(100);
+
+// ==================== 第七部分：矩阵操作 ====================
+// 展示：二维数组 [[T]]、transpose、索引访问
+
+// 成绩矩阵：3名学生 x 3门科目
+source grade_matrix : [[int]] := [
+    [85, 92, 78],
+    [90, 75, 85],
+    [78, 88, 92]
+];
+
+// 矩阵转置
+stream matrix_transposed <- transpose(grade_matrix);
+
+// 索引访问
+stream matrix_row_0 <- grade_matrix[0];
+stream matrix_row_1 <- grade_matrix[1];
+stream matrix_elem_0_0 <- grade_matrix[0][0];
+stream matrix_elem_1_2 <- grade_matrix[1][2];
+
+// 行求和
+stream row_sums <- map(grade_matrix, (row) =>
+    reduce(row, 0, (a, x) => a + x)
+);
+
+// 列求和（通过转置后的行）
+stream col_sums <- map(matrix_transposed, (col) =>
+    reduce(col, 0, (a, x) => a + x)
+);
+
+// 对角线和
+stream diag_sum <- grade_matrix[0][0] + grade_matrix[1][1] + grade_matrix[2][2];
+
+// 矩阵元素总和
+stream matrix_total <- reduce(row_sums, 0, (a, s) => a + s);
+
+// ==================== 第八部分：时序操作 ====================
+// 展示：pre、fold、on 触发器
+
+// 模拟实时成绩输入
+source new_score : int := 0;
+source update_trigger : int := 0;
+
+// pre：获取上一次输入的分数
+stream prev_score <- pre(new_score, 0);
+stream score_delta <- new_score - prev_score;
+
+// fold：累计输入次数
+stream input_count <- fold(new_score, 0, (acc, s) => acc + 1);
+
+// fold：累计分数总和
+stream running_sum <- fold(new_score, 0, (acc, s) => acc + s);
+
+// fold：实时平均分
+stream running_avg <- if input_count > 0 then running_sum / input_count else 0 end;
+
+// fold：追踪输入的最高分
+stream max_input <- fold(new_score, 0, (acc, s) =>
+    if s > acc then s else acc end
+);
+
+// fold：追踪输入的最低分（初始值设为100）
+stream min_input <- fold(new_score, 100, (acc, s) =>
+    if s < acc && s > 0 then s else acc end
+);
+
+// on 触发器：仅当 trigger 变化时递增计数
+stream triggered_count <- pre(triggered_count, 0) + 1 on update_trigger;
+
+// ==================== 第九部分：条件逻辑 ====================
+// 展示：多层 if-then-else、逻辑运算符 &&、||
+
+// 第一个学生的数学等级
+stream first_math_grade <- get_grade(head(math_scores));
+
+// 班级整体状态判定
+stream class_status <-
+    if math_avg >= 85 then "优秀班级"
+    else if math_avg >= 75 then "良好班级"
+    else if math_avg >= 60 then "合格班级"
+    else "需要努力"
+    end end end;
+
+// 复合条件判断
+stream is_excellent_class <- math_avg >= 80 && math_pass_count == student_count;
+stream has_failing_students <- math_fail_count > 0 || english_avg < 60;
+stream is_balanced <- math_avg >= 70 && chinese_avg >= 70 && english_avg >= 70;
+
+// 成绩差距判断
+stream score_range <- math_max - math_min;
+stream is_uniform <- score_range < 30;
+
+// ==================== 第十部分：结构体操作 ====================
+// 展示：创建结构体实例、字段访问
+
+// 创建数学科目统计结构体
+stream math_stats <- {
+    name: "数学",
+    avg: math_avg,
+    max: math_max,
+    min: math_min
+};
+
+// 创建语文科目统计结构体
+stream chinese_stats <- {
+    name: "语文",
+    avg: chinese_avg,
+    max: chinese_max,
+    min: min(chinese_scores)
+};
+
+// 字段访问：直接计算而不是从结构体访问（避免依赖顺序问题）
+stream math_stats_name <- "数学";
+stream math_stats_avg <- math_avg;
+stream math_stats_range <- math_max - math_min;
+
+// ==================== 第十一部分：算术运算符 ====================
+// 展示：+、-、*、/、%
+
+stream sum_demo <- 10 + 20;
+stream diff_demo <- 100 - 35;
+stream prod_demo <- 6 * 7;
+stream div_demo <- 100 / 4;
+stream mod_demo <- 17 % 5;
+
+// 复合运算
+stream complex_calc <- (math_avg * 2 + chinese_avg) / 3;
+
+// ==================== 第十二部分：输出 ====================
+// 展示：sink 输出节点
+
+// 基础统计
+sink student_count_out <- student_count;
+sink class_total_out <- class_total;
+sink class_avg_out <- class_avg;
+
+// 数学科目分析
+sink math_avg_out <- math_avg;
+sink math_max_out <- math_max;
+sink math_min_out <- math_min;
+sink math_std_out <- math_std;
+
+// 分类统计
+sink math_pass_out <- math_pass_count;
+sink math_excellent_out <- math_excellent_count;
+sink excellent_students_out <- excellent_count;
+
+// 班级状态
+sink class_status_out <- class_status;
+sink is_excellent_out <- is_excellent_class;
+sink is_balanced_out <- is_balanced;
+
+// 矩阵操作结果
+sink diag_sum_out <- diag_sum;
+sink row_sums_out <- row_sums;
+sink matrix_transposed_out <- matrix_transposed;
+
+// 递归函数结果
+sink factorial_5_out <- factorial(5);
+sink factorial_10_out <- factorial(10);
+sink fibonacci_10_out <- fibonacci(10);
+sink fibonacci_15_out <- fibonacci(15);
+
+// 数学函数
+sink sqrt_out <- sqrt_100;
+sink distance_out <- distance(0, 0, 3, 4);
+
+// 时序追踪
+sink input_count_out <- input_count;
+sink running_sum_out <- running_sum;
+sink max_input_out <- max_input;
+sink triggered_count_out <- triggered_count;
+
+// 结构体
+sink math_stats_out <- math_stats;
+sink stats_range_out <- math_stats_range;
+
+// ============================================================
+// 运行说明：
+// 1. 初始加载会显示所有统计结果
+// 2. 输入 new_score = 85 可模拟实时成绩录入
+// 3. 输入 update_trigger = 1 可测试触发器功能
+// 4. 修改 students.csv 后，统计结果自动更新（CSV热重载）
+// ============================================================

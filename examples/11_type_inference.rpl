@@ -1,0 +1,167 @@
+// 示例 11：类型推导演示
+// 功能：展示 Ripple 的类型推导机制
+// 包括：字面量推导、算术提升、复合类型、函数返回类型
+
+// ============================================================
+// 1. 基本类型推导（从字面量推断）
+// ============================================================
+
+source a := 42;           // 推导为 int
+source b := 3.14;         // 推导为 float
+source flag := true;      // 推导为 bool
+source name := "Ripple";  // 推导为 string
+
+// ============================================================
+// 2. 显式类型 vs 隐式推导
+// ============================================================
+
+source x : int := 10;     // 显式声明 int
+source y := 20;           // 隐式推导为 int
+stream sum_xy <- x + y;   // 推导为 int（int + int = int）
+
+// ============================================================
+// 3. 算术类型提升（int -> float）
+// ============================================================
+
+stream mixed <- a + b;    // int + float = float（自动提升）
+stream div_result <- a / 2;  // 除法总是返回 float
+stream mod_result <- a % 5;  // 取模返回 int
+
+// ============================================================
+// 4. 比较和逻辑运算（返回 bool）
+// ============================================================
+
+stream is_positive <- a > 0;        // 比较返回 bool
+stream is_valid <- flag && (a > 0); // 逻辑运算返回 bool
+stream check <- a == 42;            // 相等比较返回 bool
+
+// ============================================================
+// 5. 数组类型推导
+// ============================================================
+
+source nums := [1, 2, 3, 4, 5];     // 推导为 [int]
+source floats := [1.0, 2.0, 3.0];   // 推导为 [float]
+source mixed_arr := [1, 2.5, 3];    // 推导为 [float]（提升）
+
+stream first <- head(nums);          // head: [T] -> T，返回 int
+stream rest <- tail(nums);           // tail: [T] -> [T]，返回 [int]
+stream length <- len(nums);          // len: [T] -> int
+
+// ============================================================
+// 6. 数组访问类型推导
+// ============================================================
+
+stream elem <- nums[0];              // 访问返回元素类型 int
+source nested_arr := [[1,2], [3,4]]; // 推导为 [[int]]
+stream inner <- nested_arr[0];       // 返回 [int]
+stream deep <- nested_arr[0][1];     // 返回 int
+
+// ============================================================
+// 7. 结构体类型推导
+// ============================================================
+
+type Point = { x: int, y: int };
+
+source p : Point := { x: 3, y: 4 };  // 显式类型
+source q := { x: 10, y: 20 };        // 隐式推导为 struct{x:int, y:int}
+
+stream px <- p.x;                    // 字段访问返回字段类型 int
+stream dist <- sqrt(p.x * p.x + p.y * p.y);  // sqrt 返回 float
+
+// ============================================================
+// 8. 高阶函数类型推导
+// ============================================================
+
+// map: [T] × (T -> R) -> [R]
+stream doubled <- map(nums, (n) => n * 2);      // [int] -> [int]
+stream stringified <- map(nums, (n) => n + 0.5); // [int] -> [float]
+
+// filter: [T] × (T -> bool) -> [T]
+stream evens <- filter(nums, (n) => n % 2 == 0); // [int] -> [int]
+
+// reduce: [T] × R × (R, T -> R) -> R
+stream total <- reduce(nums, 0, (acc, n) => acc + n);     // int
+stream product <- reduce(nums, 1.0, (acc, n) => acc * n); // float
+
+// ============================================================
+// 9. 条件表达式类型推导（共同类型）
+// ============================================================
+
+stream result1 <- if flag then 1 else 2 end;        // int (相同类型)
+stream result2 <- if flag then 1 else 2.0 end;      // float (提升)
+stream result3 <- if flag then [1,2] else [3,4] end; // [int]
+
+// ============================================================
+// 10. let 表达式类型推导（在函数中使用）
+// ============================================================
+
+func compute_ratio(x, y) =
+    let temp = x * 2 in
+    let ratio = temp / 10 in
+    ratio + y;
+
+stream computed <- compute_ratio(a, b);  // float（除法产生 float）
+
+// ============================================================
+// 11. 用户函数返回类型推导
+// ============================================================
+
+func double(n) = n * 2;           // 参数 int -> 返回 int
+func square(n) = n * n;           // 参数 int -> 返回 int
+func hypotenuse(a, b) = sqrt(a*a + b*b);  // 返回 float
+
+stream d <- double(a);            // int
+stream s <- square(a);            // int
+stream h <- hypotenuse(3, 4);     // float
+
+// ============================================================
+// 12. 递归函数类型推导
+// ============================================================
+
+func factorial(n) =
+    if n <= 1 then 1
+    else n * factorial(n - 1)
+    end;
+
+func fibonacci(n) =
+    if n <= 1 then n
+    else fibonacci(n-1) + fibonacci(n-2)
+    end;
+
+stream fact5 <- factorial(5);     // int（从 then 分支推导）
+stream fib10 <- fibonacci(10);    // int
+
+// ============================================================
+// 13. 时态操作类型推导
+// ============================================================
+
+source tick := 0;
+
+stream prev_a <- pre(a, 0);       // pre(T, T) -> T，返回 int
+stream acc <- fold(a, 0, (s, v) => s + v);  // fold 返回初始值类型 int
+
+// ============================================================
+// 输出
+// ============================================================
+
+sink a_out <- a;
+sink b_out <- b;
+sink mixed_out <- mixed;
+sink doubled_out <- doubled;
+sink evens_out <- evens;
+sink total_out <- total;
+sink fact5_out <- fact5;
+sink fib10_out <- fib10;
+sink dist_out <- dist;
+sink h_out <- h;
+
+// 测试：
+// a=42, b=3.14
+// mixed=45.14 (int+float=float)
+// doubled=[2,4,6,8,10]
+// evens=[2,4]
+// total=15
+// fact5=120
+// fib10=55
+// dist=5.0
+// h=5.0

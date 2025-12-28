@@ -43,7 +43,7 @@ sink diag_out <- diag_sum;
 sink total_out <- total;
 
 // 测试：
-// matrix: [[1,2,3],[4,5,6],[7,8,9]]
-// transposed: [[1,4,7],[2,5,8],[3,6,9]]
+// matrix=[[1,2,3],[4,5,6],[7,8,9]]
+// transposed=[[1,4,7],[2,5,8],[3,6,9]]
 // row0=[1,2,3], col0=[1,4,7]
 // diag_sum=15, total=45

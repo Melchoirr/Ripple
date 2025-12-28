@@ -55,7 +55,8 @@ python ripple_runner.py examples/01_basic.rpl
 | `08_struct.rpl` | 结构体 |
 | `09_temporal.rpl` | 时态操作 |
 | `10_csv.rpl` | CSV 加载与热更新 |
-| `11_student_system.rpl` | 综合示例 |
+| `11_type_inference.rpl` | 类型推导演示 |
+| `12_student_system.rpl` | 综合示例 |
 
 ## 依赖
 

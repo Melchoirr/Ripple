@@ -234,15 +234,27 @@ class RippleCompiler:
         expr = decl.expression
 
         def formula(args):
+            eval_context = dict(args)
+            # 传递当前节点名称（用于处理自引用 pre）
+            eval_context['__current_node__'] = decl.name
+
             if decl.is_stateful:
                 prev_state = args.get('__state__')
-                eval_context = dict(args)
-                if prev_state is not None:
-                    eval_context[decl.name] = prev_state
+                if prev_state is None:
+                    prev_state = {}
+                # 传递状态信息给 evaluator
+                eval_context['__temporal_state__'] = prev_state
                 new_value = self.evaluator.evaluate(expr, eval_context)
-                return (new_value, new_value)
+                # 获取更新后的状态
+                new_state = eval_context.get('__temporal_state__', prev_state)
+                # 处理自引用 pre：将计算结果存储为下次的"前一个值"
+                if new_state.get('__self_ref_pre__'):
+                    pre_key = f'__pre_{decl.name}__'
+                    new_state[pre_key] = new_value
+                    del new_state['__self_ref_pre__']
+                return (new_value, new_state)
             else:
-                return self.evaluator.evaluate(expr, args)
+                return self.evaluator.evaluate(expr, eval_context)
 
         dependencies = self._normalize_dependencies(decl.static_dependencies)
 
@@ -351,8 +363,12 @@ class RippleCompiler:
 
         for name, node in stream_nodes:
             if node.formula:
-                new_value = self.engine._recompute(node)
-                node.cached_value = new_value
+                # 有触发器的流不在初始化时执行公式，使用初始值
+                if node.has_trigger:
+                    node.cached_value = node.initial_value
+                else:
+                    new_value = self.engine._recompute(node)
+                    node.cached_value = new_value
 
     def run(self, source_code: str) -> RippleEngine:
         """编译并返回引擎"""

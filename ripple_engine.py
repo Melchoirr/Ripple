@@ -99,6 +99,8 @@ class GraphNode:
     subscribers: Set[str] = field(default_factory=set)  # 订阅者（子节点）
     is_dirty: bool = False  # 是否需要重新计算
     is_source: bool = False  # 是否是源节点
+    has_trigger: bool = False  # 是否有触发器（on trigger）
+    initial_value: Any = None  # 初始值（用于 on trigger 的流）
 
 
 @dataclass
@@ -134,12 +136,13 @@ class RippleEngine:
 
     def add_stream(self, name: str, formula: Callable, dependencies: Set[str],
                    is_stateful: bool = False, initial_state: Any = None,
-                   trigger_deps: Set[str] = None):
+                   trigger_deps: Set[str] = None, initial_value: Any = 0):
         """添加流节点
 
         Args:
             trigger_deps: 触发依赖（只有这些依赖变化时才重新计算）
                           如果为 None，则所有 dependencies 都是触发依赖
+            initial_value: 初始值（用于有触发器的流）
         """
         # 计算 rank（基于依赖节点的最大 rank + 1）
         max_dep_rank = 0
@@ -148,6 +151,7 @@ class RippleEngine:
                 max_dep_rank = max(max_dep_rank, self.nodes[dep].rank)
 
         rank = max_dep_rank + 1
+        has_trigger = trigger_deps is not None
 
         node = GraphNode(
             name=name,
@@ -155,7 +159,9 @@ class RippleEngine:
             rank=rank,
             is_stateful=is_stateful,
             state=initial_state,
-            dependencies=dependencies
+            dependencies=dependencies,
+            has_trigger=has_trigger,
+            initial_value=initial_value
         )
         self.nodes[name] = node
 
@@ -338,44 +344,86 @@ class ExpressionEvaluator:
         elif isinstance(expr, PreOp):
             # Pre 操作符：返回前一时刻的值
             stream_name = expr.stream_name
-            if stream_name in self.engine.nodes:
-                node = self.engine.nodes[stream_name]
-                if node.state is not None:
-                    return node.state
-                else:
-                    return self.evaluate(expr.initial_value, context)
+            state = context.get('__temporal_state__', {})
+            pre_key = f'__pre_{stream_name}__'
+            current_node = context.get('__current_node__')
+
+            # 检查是否是自引用（pre(counter, 0) 在 counter 流中）
+            is_self_ref = (stream_name == current_node)
+
+            # 获取前一个值（或初始值）
+            if pre_key in state:
+                prev_value = state[pre_key]
             else:
-                return self.evaluate(expr.initial_value, context)
+                prev_value = self.evaluate(expr.initial_value, context)
+
+            if is_self_ref:
+                # 自引用：标记需要在计算完成后更新状态
+                # 状态更新将在外层处理（返回值会成为下次的 prev）
+                state['__self_ref_pre__'] = True
+            else:
+                # 非自引用：获取当前值并存储
+                current_value = context.get(stream_name)
+                if current_value is None and stream_name in self.engine.nodes:
+                    current_value = self.engine.nodes[stream_name].cached_value
+                state[pre_key] = current_value
+
+            context['__temporal_state__'] = state
+            return prev_value
 
         elif isinstance(expr, FoldOp):
-            # Fold 操作符：对数组进行折叠
-            # fold(array, initial, (acc, x) => body)
-            array_value = self.evaluate(expr.stream, context)
+            # Fold 操作符：时间上的状态累积
+            # fold(stream, initial, (acc, v) => body)
+            # 每次 stream 变化时，用累积函数更新状态
+            state = context.get('__temporal_state__', {})
+            fold_key = '__fold_acc__'
+            init_key = '__fold_initialized__'
+
+            # 首次初始化时，返回初始值，不应用累积函数
+            if init_key not in state:
+                initial = self.evaluate(expr.initial, context)
+                state[fold_key] = initial
+                state[init_key] = True
+                context['__temporal_state__'] = state
+                return initial
+
+            # 获取当前累积值
+            acc = state[fold_key]
+
+            # 获取当前输入值
+            current_value = self.evaluate(expr.stream, context)
             accumulator_func = expr.accumulator
 
-            # 获取初始累积值
-            acc = self.evaluate(expr.initial, context)
+            # 对当前值应用累积函数（单次应用）
+            lambda_context = dict(context)
+            lambda_context[accumulator_func.parameters[0]] = acc
+            lambda_context[accumulator_func.parameters[1]] = current_value
+            new_acc = self.evaluate(accumulator_func.body, lambda_context)
 
-            # 对数组中的每个元素应用累积函数
-            if isinstance(array_value, list):
-                for elem in array_value:
-                    lambda_context = dict(context)
-                    lambda_context[accumulator_func.parameters[0]] = acc
-                    lambda_context[accumulator_func.parameters[1]] = elem
-                    acc = self.evaluate(accumulator_func.body, lambda_context)
-            else:
-                # 如果不是数组，当作单个元素处理
-                lambda_context = dict(context)
-                lambda_context[accumulator_func.parameters[0]] = acc
-                lambda_context[accumulator_func.parameters[1]] = array_value
-                acc = self.evaluate(accumulator_func.body, lambda_context)
+            # 更新状态
+            state[fold_key] = new_acc
+            context['__temporal_state__'] = state
 
-            return acc
+            return new_acc
 
         elif isinstance(expr, FunctionCall):
             # 先检查用户定义的函数
             if expr.name in self.user_functions:
                 return self._apply_user_function(expr.name, expr.arguments, context)
+
+            # 特殊处理 count_if（带 Lambda 参数）
+            if expr.name == 'count_if' and len(expr.arguments) == 2:
+                array = self.evaluate(expr.arguments[0], context)
+                predicate = expr.arguments[1]
+                if isinstance(predicate, Lambda):
+                    count = 0
+                    for elem in array:
+                        lambda_context = dict(context)
+                        lambda_context[predicate.parameters[0]] = elem
+                        if self.evaluate(predicate.body, lambda_context):
+                            count += 1
+                    return count
+
             # 否则使用内置函数
             args = [self.evaluate(arg, context) for arg in expr.arguments]
             return self._apply_function(expr.name, args)
@@ -447,10 +495,10 @@ class ExpressionEvaluator:
             acc = self.evaluate(expr.initial, context)
 
             for elem in array:
-                lambda_context = {
-                    expr.accumulator.parameters[0]: acc,
-                    expr.accumulator.parameters[1]: elem
-                }
+                # 继承外部上下文，以便访问外部变量
+                lambda_context = dict(context)
+                lambda_context[expr.accumulator.parameters[0]] = acc
+                lambda_context[expr.accumulator.parameters[1]] = elem
                 acc = self.evaluate(expr.accumulator.body, lambda_context)
 
             return acc

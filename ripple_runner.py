@@ -49,6 +49,49 @@ class RippleRunner:
             traceback.print_exc()
             return False
 
+    def _parse_value(self, value_str: str):
+        """解析用户输入的值，支持数组和结构体"""
+        import ast
+        import re
+        value_str = value_str.strip()
+
+        # 处理结构体语法 {x:3, y:4} -> {"x": 3, "y": 4}
+        if value_str.startswith('{') and value_str.endswith('}'):
+            # 将无引号的键名转换为带引号的格式
+            converted = re.sub(r'(\w+)\s*:', r'"\1":', value_str)
+            try:
+                return ast.literal_eval(converted)
+            except (ValueError, SyntaxError):
+                pass
+
+        # 尝试使用 ast.literal_eval 解析 Python 字面量（支持列表、字典等）
+        try:
+            return ast.literal_eval(value_str)
+        except (ValueError, SyntaxError):
+            pass
+
+        # 尝试解析为整数
+        try:
+            return int(value_str)
+        except ValueError:
+            pass
+
+        # 尝试解析为浮点数
+        try:
+            return float(value_str)
+        except ValueError:
+            pass
+
+        # 布尔值
+        if value_str.lower() == 'true':
+            return True
+        elif value_str.lower() == 'false':
+            return False
+
+        # 默认为字符串
+        return value_str.strip('"\'')
+
+
     def _setup_and_start_watcher(self):
         """设置并启动 CSV 文件监听"""
         self.watcher = CSVWatcher()
@@ -136,29 +179,24 @@ class RippleRunner:
 
                 # 解析输入：source_name = value
                 if '=' in user_input:
-                    parts = user_input.split('=')
+                    parts = user_input.split('=', 1)  # 只分割第一个 =，支持结构体语法
                     if len(parts) == 2:
                         source_name = parts[0].strip()
                         value_str = parts[1].strip()
 
-                        if source_name not in sources:
+                        # 检查是否是有效的源节点或结构体
+                        is_valid = source_name in sources
+                        # 检查是否是结构体（有字段级源节点）
+                        if not is_valid:
+                            field_prefix = f"{source_name}."
+                            is_valid = any(s.startswith(field_prefix) for s in sources)
+
+                        if not is_valid:
                             print(f"'{source_name}' 不是有效的源节点")
                             continue
 
                         # 解析值
-                        try:
-                            value = int(value_str)
-                        except ValueError:
-                            try:
-                                value = float(value_str)
-                            except ValueError:
-                                if value_str.lower() == 'true':
-                                    value = True
-                                elif value_str.lower() == 'false':
-                                    value = False
-                                else:
-                                    value = value_str.strip('"\'')
-
+                        value = self._parse_value(value_str)
                         self.engine.push_event(source_name, value)
                         self.show_outputs()
                     else:
